@@ -24,11 +24,11 @@ class Phylogeny:
     """
     num_leaves : int
     num_characters : int
+    max_alphabet_size : int
     root : int
     tree : nx.DiGraph
-    character_matrix : jnp.array
-    leaf_to_row : jnp.array
-    mutation_priors : jnp.array
+    character_matrix : jnp.array # shape (num_leaves, num_characters)
+    mutation_priors : jnp.array  # shape (num_characters, max_alphabet_size)
 
 @dataclass
 class PhylogenyOptimization:
@@ -36,12 +36,15 @@ class PhylogenyOptimization:
     Represents a phylogeny optimization problem, with a Phylogeny object,
     branch lengths, and model parameters.
     """
-    phylogeny : Phylogeny
-    branch_lengths : jnp.array
+    phylogeny : Phylogeny 
+    branch_lengths : jnp.array # shape (2 * num_leaves - 1,)
     model_parameters : jnp.array
+    inside_log_likelihoods : jnp.array # shape (num_characters, 2 * num_leaves - 1, max_alphabet_size + 2)
 
 def build_phylogeny(tree: nx.DiGraph, num_leaves: int, character_matrix: pd.DataFrame, mutation_priors: pd.DataFrame) -> Phylogeny:
-    """Constructs a Phylogeny object from the parsed components."""
+    """
+    Constructs a Phylogeny object from the parsed components.
+    """
     roots = [n for n in tree.nodes() if tree.in_degree(n) == 0]
     if len(roots) != 1:
         lg.logger.error("The tree has more than one root.")
@@ -88,18 +91,21 @@ def build_phylogeny(tree: nx.DiGraph, num_leaves: int, character_matrix: pd.Data
 
     leaf_to_row = jnp.zeros(num_leaves, dtype=jnp.int32)
     for node in tree.nodes():
-        if tree.out_degree(node) == 0:  # Leaf node
-            leaf_name = tree.nodes[node]["name"]
+        if tree.out_degree(node) == 0:
+            leaf_name = tree.nodes[node]["label"]
             row_idx = character_matrix_recode.index.get_loc(leaf_name)
             leaf_to_row = leaf_to_row.at[node].set(row_idx)
+
+    # reorder the character matrix to match the leaf order in the tree
+    character_matrix_jax = character_matrix_jax[leaf_to_row, :]
 
     return Phylogeny(
         num_leaves=num_leaves,
         num_characters=num_characters,
+        max_alphabet_size=max_alphabet_size,
         root=root,
         tree=tree,
         character_matrix=character_matrix_jax,
-        leaf_to_row=leaf_to_row,
         mutation_priors=mutation_priors_jax
     )
 
@@ -124,7 +130,7 @@ def parse_newick(newick):
         elif label is None:
             label = f"node_{str(idx)}"
 
-        tree.add_node(idx, name=label, branch_length=v.get_edge_length())
+        tree.add_node(idx, label=label, branch_length=v.get_edge_length())
         v.set_label(idx)
 
         if v.is_root(): continue
