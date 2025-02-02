@@ -1,3 +1,4 @@
+import time
 import argparse
 import math
 import random
@@ -30,7 +31,8 @@ def compute_internal_log_likelihoods(
     internal_postorder_children: jnp.array,
     branch_lengths: jnp.array,
     model_parameters: jnp.array,
-    mutation_priors: jnp.array
+    mutation_priors: jnp.array,
+    root : int
 ) -> jnp.array:
     alphabet_size = inside_log_likelihoods.shape[2]
 
@@ -78,7 +80,13 @@ def compute_internal_log_likelihoods(
         # Update the inside log likelihoods for the current node
         inside_log_likelihoods = inside_log_likelihoods.at[:, u, :].set(llh_v + llh_w)
 
-    return inside_log_likelihoods
+    blength_root = branch_lengths[root]
+    t1_root = -blength_root * model_parameters[0]
+    t2_root = jnp.log(1 - jnp.exp(-blength_root * model_parameters[0]))
+    t3_root = jnp.log(1 - jnp.exp(-blength_root))
+    inside_root_llh = compute_child_llh(root, blength_root, t1_root, t2_root, t3_root)
+
+    return inside_log_likelihoods, inside_root_llh
 
 @jax.jit
 def initialize_leaf_inside_log_likelihoods(
@@ -124,46 +132,42 @@ def initialize_leaf_inside_log_likelihoods(
 def main(phylo_opt):
     phylogeny = phylo_opt.phylogeny
 
+    # normalize mutation priors
+    phylogeny.mutation_priors = phylogeny.mutation_priors / phylogeny.mutation_priors.sum(axis=1)[:, None]
     leaves = jnp.array([n for n in phylogeny.tree.nodes() if phylogeny.tree.out_degree(n) == 0])
     internal_postorder = [n for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
     internal_postorder = jnp.array(internal_postorder)
     internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
 
     # initialize the inside log likelihoods for the leaves
-    import time
+    start = time.time()
+    phylo_opt.inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
+        phylo_opt.inside_log_likelihoods, 
+        leaves, 
+        phylo_opt.model_parameters, 
+        phylogeny.character_matrix
+    )
 
-    print(phylo_opt.branch_lengths)
-    print(internal_postorder)
-    print(internal_postorder_children)
-    for i in range(10):
-        start = time.time()
-        phylo_opt.inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
-            phylo_opt.inside_log_likelihoods, 
-            leaves, 
-            phylo_opt.model_parameters, 
-            phylogeny.character_matrix
-        )
-
-        phylo_opt.inside_log_likelihoods = compute_internal_log_likelihoods(
-            phylo_opt.inside_log_likelihoods, 
-            internal_postorder,
-            internal_postorder_children,
-            phylo_opt.branch_lengths,
-            phylo_opt.model_parameters,
-            phylogeny.mutation_priors
-        )
-        end = time.time()
-        print(f"Time taken: {end - start}")
+    phylo_opt.inside_log_likelihoods, inside_root_llh = compute_internal_log_likelihoods(
+        phylo_opt.inside_log_likelihoods, 
+        internal_postorder,
+        internal_postorder_children,
+        phylo_opt.branch_lengths,
+        phylo_opt.model_parameters,
+        phylogeny.mutation_priors,
+        phylogeny.root
+    )
+    end = time.time()
+    print(f"Time taken: {end - start}")
 
     root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
     print(f"Node {root}: {phylogeny.tree.nodes[root]}")
-    print(jnp.exp(phylo_opt.inside_log_likelihoods[:, root, :]))
-    print(phylo_opt.inside_log_likelihoods[:, root, 0].sum())
+    print(inside_root_llh)
 
-    for n in phylogeny.tree.nodes():
-        if phylogeny.tree.in_degree(n) != 0:
-            print(f"Node {n}: {phylogeny.tree.nodes[n]}")
-            print(jnp.exp(phylo_opt.inside_log_likelihoods[:, n, :]))
+    # for n in phylogeny.tree.nodes():
+        # if phylogeny.tree.in_degree(n) != 0:
+            # print(f"Node {n}: {phylogeny.tree.nodes[n]}")
+            # print(jnp.exp(phylo_opt.inside_log_likelihoods[:, n, :]))
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -194,7 +198,7 @@ if __name__ == "__main__":
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
     branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
-    model_parameters = jnp.array([0.1, 0.2]) # for LAML the model parameters are [ν, ϕ]
+    model_parameters = jnp.array([0.0, 0.0]) # for LAML the model parameters are [ν, ϕ]
     phylo_opt = phylogeny.PhylogenyOptimization(
         phylogeny=phylo, 
         branch_lengths=branch_lengths, 
