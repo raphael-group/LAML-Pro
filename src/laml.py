@@ -23,59 +23,60 @@ is ordered {0, 1, ..., A, -1}, where A is the size
 of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
-
-# @jax.jit
+@jax.jit
 def compute_internal_log_likelihoods(
-    inside_log_likelihoods : jnp.array,
-    internal_postorder : jnp.array,
-    internal_postorder_children : jnp.array,
-    branch_lengths : jnp.array,
-    model_parameters : jnp.array,
-    mutation_priors : jnp.array
+    inside_log_likelihoods: jnp.array,
+    internal_postorder: jnp.array,
+    internal_postorder_children: jnp.array,
+    branch_lengths: jnp.array,
+    model_parameters: jnp.array,
+    mutation_priors: jnp.array
 ) -> jnp.array:
-    """
-    Computes the inside log likelihoods for the internal nodes of the phylogeny.
-    """
-
     alphabet_size = inside_log_likelihoods.shape[2]
 
-    def compute_llh(ν, t1, t2, t3, blen, z, c, α):
-        if α == alphabet_size - 1:
-            return inside_log_likelihoods[c, z, -1]
-        elif α == 0:
-            summands = jnp.zeros(alphabet_size)
-            for β in range(alphabet_size):
-                if β == 0:
-                    summands = summands.at[β].set(-blen*(1+ν))
-                elif β == alphabet_size - 1:
-                    summands = summands.at[β].set(t2)
-                else:
-                    prior = jnp.log(mutation_priors[c, β - 1])
-                    summands = summands.at[β].set(t1 + prior + t3)
-
-            return jax.nn.logsumexp(summands + inside_log_likelihoods[c,z,:])
-        else:
-            return jnp.logaddexp(t1 + inside_log_likelihoods[c,z,α], t2 + inside_log_likelihoods[c,z,-1])
+    def compute_child_llh(z, blen, t1, t2, t3):
+        # Vectorized computation for each child's contribution
+        mask_alpha_last = jnp.arange(alphabet_size) == (alphabet_size - 1)
+        llh_case1 = jnp.where(mask_alpha_last, inside_log_likelihoods[:, z, -1][:, None], 0.0)
+        
+        mask_alpha_zero = jnp.arange(alphabet_size) == 0
+        # Compute summands for alpha=0
+        summands = jnp.zeros((inside_log_likelihoods.shape[0], alphabet_size))
+        summands = summands.at[:, 0].set(-blen * (1 + model_parameters[0]))
+        if alphabet_size > 2:
+            summands = summands.at[:, 1:(alphabet_size - 1)].set(
+                t1 + jnp.log(mutation_priors) + t3
+            )
+        summands = summands.at[:, -1].set(t2)
+        logsumexp_val = jax.nn.logsumexp(summands + inside_log_likelihoods[:, z, :], axis=1)
+        llh_case2 = jnp.where(mask_alpha_zero, logsumexp_val[:, None], 0.0)
+        
+        mask_alpha_other = ~ (mask_alpha_zero | mask_alpha_last)
+        term1 = t1 + inside_log_likelihoods[:, z, :]
+        term2 = t2 + inside_log_likelihoods[:, z, -1][:, None]
+        logaddexp_result = jnp.logaddexp(term1, term2)
+        llh_case3 = jnp.where(mask_alpha_other, logaddexp_result, 0.0)
+        
+        return llh_case1 + llh_case2 + llh_case3
 
     for i, u in enumerate(internal_postorder):
         v, w = internal_postorder_children[i]
         bv = branch_lengths[v]
         bw = branch_lengths[w]
 
-        t1_v = -bv*model_parameters[0]
-        t1_w = -bw*model_parameters[0]
-
-        t2_v = jnp.log(1 - jnp.exp(-bv*model_parameters[0]))
-        t2_w = jnp.log(1 - jnp.exp(-bw*model_parameters[0]))
-
+        t1_v = -bv * model_parameters[0]
+        t2_v = jnp.log(1 - jnp.exp(-bv * model_parameters[0]))
         t3_v = jnp.log(1 - jnp.exp(-bv))
+
+        t1_w = -bw * model_parameters[0]
+        t2_w = jnp.log(1 - jnp.exp(-bw * model_parameters[0]))
         t3_w = jnp.log(1 - jnp.exp(-bw))
 
-        for c in range(inside_log_likelihoods.shape[0]):
-            for α in range(alphabet_size):
-                llh_v = compute_llh(model_parameters[0], t1_v, t2_v, t3_v, bv, v, c, α)
-                llh_w = compute_llh(model_parameters[0], t1_w, t2_w, t3_w, bw, w, c, α)
-                inside_log_likelihoods = inside_log_likelihoods.at[c, u, α].set(llh_v + llh_w)
+        llh_v = compute_child_llh(v, bv, t1_v, t2_v, t3_v)
+        llh_w = compute_child_llh(w, bw, t1_w, t2_w, t3_w)
+
+        # Update the inside log likelihoods for the current node
+        inside_log_likelihoods = inside_log_likelihoods.at[:, u, :].set(llh_v + llh_w)
 
     return inside_log_likelihoods
 
@@ -131,31 +132,38 @@ def main(phylo_opt):
     # initialize the inside log likelihoods for the leaves
     import time
 
-    start = time.time()
-    phylo_opt.inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
-        phylo_opt.inside_log_likelihoods, 
-        leaves, 
-        phylo_opt.model_parameters, 
-        phylogeny.character_matrix
-    )
-
+    print(phylo_opt.branch_lengths)
     print(internal_postorder)
     print(internal_postorder_children)
-    phylo_opt.inside_log_likelihoods = compute_internal_log_likelihoods(
-        phylo_opt.inside_log_likelihoods, 
-        internal_postorder,
-        internal_postorder_children,
-        phylo_opt.branch_lengths,
-        phylo_opt.model_parameters,
-        phylogeny.mutation_priors
-    )
-    end = time.time()
+    for i in range(10):
+        start = time.time()
+        phylo_opt.inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
+            phylo_opt.inside_log_likelihoods, 
+            leaves, 
+            phylo_opt.model_parameters, 
+            phylogeny.character_matrix
+        )
+
+        phylo_opt.inside_log_likelihoods = compute_internal_log_likelihoods(
+            phylo_opt.inside_log_likelihoods, 
+            internal_postorder,
+            internal_postorder_children,
+            phylo_opt.branch_lengths,
+            phylo_opt.model_parameters,
+            phylogeny.mutation_priors
+        )
+        end = time.time()
+        print(f"Time taken: {end - start}")
+
+    root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
+    print(f"Node {root}: {phylogeny.tree.nodes[root]}")
+    print(jnp.exp(phylo_opt.inside_log_likelihoods[:, root, :]))
+    print(phylo_opt.inside_log_likelihoods[:, root, 0].sum())
 
     for n in phylogeny.tree.nodes():
-        print(f"Node {n}: {phylogeny.tree.nodes[n]}")
-        print(jnp.exp(phylo_opt.inside_log_likelihoods[:, n, :]))
-
-    print(f"Time taken: {end - start}")
+        if phylogeny.tree.in_degree(n) != 0:
+            print(f"Node {n}: {phylogeny.tree.nodes[n]}")
+            print(jnp.exp(phylo_opt.inside_log_likelihoods[:, n, :]))
 
 def parse_args():
     p = argparse.ArgumentParser()
