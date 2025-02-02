@@ -34,17 +34,17 @@ def compute_internal_log_likelihoods(
     mutation_priors: jnp.array,
     root : int
 ) -> jnp.array:
+    ν = model_parameters[0]
     alphabet_size = inside_log_likelihoods.shape[2]
-
+    
     def compute_child_llh(z, blen, t1, t2, t3):
-        # Vectorized computation for each child's contribution
         mask_alpha_last = jnp.arange(alphabet_size) == (alphabet_size - 1)
         llh_case1 = jnp.where(mask_alpha_last, inside_log_likelihoods[:, z, -1][:, None], 0.0)
         
         mask_alpha_zero = jnp.arange(alphabet_size) == 0
-        # Compute summands for alpha=0
+
         summands = jnp.zeros((inside_log_likelihoods.shape[0], alphabet_size))
-        summands = summands.at[:, 0].set(-blen * (1 + model_parameters[0]))
+        summands = summands.at[:, 0].set(-blen * (1 + ν))
         if alphabet_size > 2:
             summands = summands.at[:, 1:(alphabet_size - 1)].set(
                 t1 + jnp.log(mutation_priors) + t3
@@ -66,23 +66,22 @@ def compute_internal_log_likelihoods(
         bv = branch_lengths[v]
         bw = branch_lengths[w]
 
-        t1_v = -bv * model_parameters[0]
-        t2_v = jnp.log(1 - jnp.exp(-bv * model_parameters[0]))
+        t1_v = -bv * ν 
+        t2_v = jnp.log(1 - jnp.exp(-bv * ν))
         t3_v = jnp.log(1 - jnp.exp(-bv))
 
-        t1_w = -bw * model_parameters[0]
-        t2_w = jnp.log(1 - jnp.exp(-bw * model_parameters[0]))
+        t1_w = -bw * ν
+        t2_w = jnp.log(1 - jnp.exp(-bw * ν))
         t3_w = jnp.log(1 - jnp.exp(-bw))
 
         llh_v = compute_child_llh(v, bv, t1_v, t2_v, t3_v)
         llh_w = compute_child_llh(w, bw, t1_w, t2_w, t3_w)
 
-        # Update the inside log likelihoods for the current node
         inside_log_likelihoods = inside_log_likelihoods.at[:, u, :].set(llh_v + llh_w)
 
     blength_root = branch_lengths[root]
-    t1_root = -blength_root * model_parameters[0]
-    t2_root = jnp.log(1 - jnp.exp(-blength_root * model_parameters[0]))
+    t1_root = -blength_root * ν
+    t2_root = jnp.log(1 - jnp.exp(-blength_root * ν))
     t3_root = jnp.log(1 - jnp.exp(-blength_root))
     inside_root_llh = compute_child_llh(root, blength_root, t1_root, t2_root, t3_root)
 
@@ -123,18 +122,14 @@ def initialize_leaf_inside_log_likelihoods(
     
     return jnp.log(inside_log_likelihoods)
 
-def main(phylo_opt):
+def compute_llh(phylo_opt):
     phylogeny = phylo_opt.phylogeny
 
-    # normalize mutation priors
-    phylogeny.mutation_priors = phylogeny.mutation_priors / phylogeny.mutation_priors.sum(axis=1)[:, None]
     leaves = jnp.array([n for n in phylogeny.tree.nodes() if phylogeny.tree.out_degree(n) == 0])
     internal_postorder = [n for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
     internal_postorder = jnp.array(internal_postorder)
     internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
 
-    # initialize the inside log likelihoods for the leaves
-    start = time.time()
     phylo_opt.inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
         phylo_opt.inside_log_likelihoods, 
         leaves, 
@@ -151,12 +146,13 @@ def main(phylo_opt):
         phylogeny.mutation_priors,
         phylogeny.root
     )
-    end = time.time()
-    print(f"Time taken: {end - start}")
 
+    return inside_root_llh[:, 0].sum(), inside_root_llh
+
+def main(phylo_opt):
+    phylogeny = phylo_opt.phylogeny
+    llh, inside_root_llh = compute_llh(phylo_opt)
     root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
-    print(f"Inside log likelihoods at the root node {root}:")
-    print(inside_root_llh)
 
     for n in phylogeny.tree.nodes():
         print(f"Node {n}: {phylogeny.tree.nodes[n]}")
@@ -188,6 +184,7 @@ if __name__ == "__main__":
     if n != character_matrix.shape[0]:
         lg.logger.error("The tree and character matrix have different numbers of taxa.")
         sys.exit(1)
+
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
     branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
