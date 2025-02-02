@@ -95,38 +95,32 @@ def initialize_leaf_inside_log_likelihoods(
     model_parameters : jnp.array,
     character_matrix : jnp.array
 ) -> jnp.array:
-    """
-    Initializes the inside log likelihoods for the leaves of the phylogeny.
-    """
-
+    num_characters = inside_log_likelihoods.shape[0]
+    alphabet_size  = inside_log_likelihoods.shape[2]
+    ϕ = model_parameters[1]
+    
     leaf_characters = character_matrix[leaves, :]
-    leaf_characters_expanded = jnp.expand_dims(leaf_characters.T, axis=2)  # (C, L, 1)
     
-    alphabet_size = inside_log_likelihoods.shape[2]
-    alpha_grid = jnp.arange(alphabet_size)  # (A,)
-    alpha_grid_expanded = jnp.expand_dims(alpha_grid, axis=(0, 1))  # (1, 1, A)
+    alpha_grid = jnp.arange(alphabet_size)
     
-    mask_last_alpha = (alpha_grid_expanded == (alphabet_size - 1))  # (1, 1, A)
+    leaf_chars_expanded = leaf_characters[..., None] # shape (L, C, 1)
+    alpha_expanded      = alpha_grid[None, None, :]  # shape (1, 1, A)
+
+    cond_1 = ((alpha_expanded == (alphabet_size - 1)) & (leaf_chars_expanded == -1)) # (1) alpha==A-1 & char==-1
+    cond_2 = ((alpha_expanded == (alphabet_size - 1)) & (leaf_chars_expanded != -1)) # (2) alpha==A-1 & char!=-1
+    cond_3 = (alpha_expanded == leaf_chars_expanded)                                 # (3) alpha==char
+    cond_4 = (leaf_chars_expanded == -1)                                             # (4) char==-1           
     
-    value_when_last = jnp.where(
-        leaf_characters_expanded == -1,
-        1.0,
-        model_parameters[1]
-    ) # (C, L, 1)
+    conditions = [cond_1, cond_2, cond_3, cond_4]
+    choices    = [1.0, ϕ, 1.0 - ϕ, ϕ]
     
-    value_when_not_last = jnp.where(
-        alpha_grid_expanded == leaf_characters_expanded,
-        1.0 - model_parameters[1],
-        0.0
-    ) # (C, L, A)
+    leaf_inside_probs = jnp.select(conditions, choices, default=0.0)
+    leaf_inside_probs_T = jnp.swapaxes(leaf_inside_probs, 0, 1)  # now (C, L, A)
     
-    initial_values = jnp.where(
-        mask_last_alpha,
-        value_when_last,
-        value_when_not_last
-    ) # (C, L, A)
+    inside_log_likelihoods = inside_log_likelihoods.at[:, leaves, :].set(
+        leaf_inside_probs_T
+    )
     
-    inside_log_likelihoods = inside_log_likelihoods.at[:, leaves, :].set(initial_values)
     return jnp.log(inside_log_likelihoods)
 
 def main(phylo_opt):
@@ -161,13 +155,12 @@ def main(phylo_opt):
     print(f"Time taken: {end - start}")
 
     root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
-    print(f"Node {root}: {phylogeny.tree.nodes[root]}")
+    print(f"Inside log likelihoods at the root node {root}:")
     print(inside_root_llh)
 
-    # for n in phylogeny.tree.nodes():
-        # if phylogeny.tree.in_degree(n) != 0:
-            # print(f"Node {n}: {phylogeny.tree.nodes[n]}")
-            # print(jnp.exp(phylo_opt.inside_log_likelihoods[:, n, :]))
+    for n in phylogeny.tree.nodes():
+        print(f"Node {n}: {phylogeny.tree.nodes[n]}")
+        print(phylo_opt.inside_log_likelihoods[:, n, :])
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -198,7 +191,7 @@ if __name__ == "__main__":
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
     branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
-    model_parameters = jnp.array([0.0, 0.0]) # for LAML the model parameters are [ν, ϕ]
+    model_parameters = jnp.array([0.0, 0.1]) # for LAML the model parameters are [ν, ϕ]
     phylo_opt = phylogeny.PhylogenyOptimization(
         phylogeny=phylo, 
         branch_lengths=branch_lengths, 
