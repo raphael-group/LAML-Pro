@@ -41,121 +41,121 @@ class LLHTest(unittest.TestCase):
     def test_unit_1(self):
         phylo_opt = build_build_unit_test([1, 1, 1], 0.0, 0.0, [1.0])
         true_llh  = -0.20665578828621584
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_2(self):
         phylo_opt = build_build_unit_test([1, 1, 0], 0.0, 0.0, [1.0])
         true_llh  = -2.2495946917551692
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_3(self):
         phylo_opt = build_build_unit_test([1, 0, 1], 0.0, 0.0, [1.0])
         true_llh  = -3.917350291274164
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_4(self):
         phylo_opt = build_build_unit_test([0, 1, 1], 0.0, 0.0, [1.0])
         true_llh  = -3.917350291274164
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_5(self):
         phylo_opt = build_build_unit_test([1, 0, 0], 0.0, 0.0, [1.0])
         true_llh  = -4.4586751457870815
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_6(self):
         phylo_opt = build_build_unit_test([0, 1, 0], 0.0, 0.0, [1.0])
         true_llh  = -4.4586751457870815
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_7(self):
         phylo_opt = build_build_unit_test([0, 0, 1], 0.0, 0.0, [1.0])
         true_llh  = -4.4586751457870815
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=3)
 
     def test_unit_8(self):
         phylo_opt = build_build_unit_test([0, 0, 0], 0.0, 0.0, [1.0])
         true_llh  = -5.0
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=3)
 
     def test_unit_9(self):
         phylo_opt = build_build_unit_test([0, 0, -1], 0.1, 0.0, [1.0])
         true_llh  = -6.513306124309698
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_10(self):
         phylo_opt = build_build_unit_test([0, -1, 0], 0.1, 0.0, [1.0])
         true_llh  = -6.513306124309698
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_11(self):
         phylo_opt = build_build_unit_test([-1, 0, 0], 0.1, 0.0, [1.0])
         true_llh  = -6.513306124309698
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_12(self):
         phylo_opt = build_build_unit_test([0, 1, -1], 0.1, 0.0, [1.0])
         true_llh  = -5.97198126969678
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_13(self):
         phylo_opt = build_build_unit_test([0, -1, 1], 0.1, 0.0, [1.0])
         true_llh  = -5.97198126969678
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_14(self):
         phylo_opt = build_build_unit_test([-1, 0, 1], 0.1, 0.0, [1.0])
         true_llh  = -5.97198126969678
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_15(self):
         phylo_opt = build_build_unit_test([1, -1, 0], 0.1, 0.0, [1.0])
         true_llh  = -4.658719582178557
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_16(self):
         phylo_opt = build_build_unit_test([-1, 1, 0], 0.1, 0.0, [1.0])
         true_llh  = -4.658719582178557
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_17(self):
         phylo_opt = build_build_unit_test([1, 1, -1], 0.1, 0.0, [1.0])
         true_llh  = -2.5980566021648364
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_18(self):
         phylo_opt = build_build_unit_test([1, -1, 1], 0.1, 0.0, [1.0])
         true_llh  = -2.695795750497349
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_19(self):
         phylo_opt = build_build_unit_test([-1, 1, 1], 0.1, 0.0, [1.0])
         true_llh  = -2.695795750497349
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
     def test_unit_20(self):
         phylo_opt = build_build_unit_test([1, 1, 1], 0.0, 0.0, [0.5, 0.5])
         true_llh  = -1.0297894223949402
-        llh, _    = laml.compute_llh(phylo_opt)
+        llh    = laml.compute_llh(phylo_opt)
         self.assertAlmostEqual(llh, true_llh, places=4)
 
 if __name__ == '__main__':
