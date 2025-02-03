@@ -6,6 +6,7 @@ import random
 import sys
 import jax
 import phylogeny
+import os
 
 import pandas as pd
 import networkx as nx
@@ -25,6 +26,10 @@ is ordered {0, 1, ..., A, -1}, where A is the size
 of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
+
+EPS = 1e-6
+GRAD_STEP_SIZE = 5e-4
+GRAD_STEPS = 250
 
 def compute_internal_log_likelihoods(
     inside_log_likelihoods: jnp.array,
@@ -112,7 +117,8 @@ def initialize_leaf_inside_log_likelihoods(
     cond_4 = (leaf_chars_expanded == -1)                                             # (4) char==-1           
     
     conditions = [cond_1, cond_2, cond_3, cond_4]
-    choices    = [1.0, 0, 1.0 - ϕ, ϕ]
+    choices    = [1.0, 0.0, 1.0 - ϕ, ϕ]
+    choices    = jnp.maximum(jnp.array(choices), EPS)
     
     leaf_inside_probs = jnp.select(conditions, choices, default=0.0)
     leaf_inside_probs_T = jnp.swapaxes(leaf_inside_probs, 0, 1)  # now (C, L, A)
@@ -123,7 +129,6 @@ def initialize_leaf_inside_log_likelihoods(
     
     return jnp.log(inside_log_likelihoods)
 
-@jax.jit
 def compute_log_likelihood(
         branch_lengths : jnp.array,
         mutation_priors : jnp.array,
@@ -165,9 +170,10 @@ def optimize_parameters(
     mutation_priors : jnp.array,
     root : int
     ):
-    # take gradient of log likelihood with respect to model parameters and branch lengths
 
-    def loss_fn(params):
+    logit_model_parameters = jnp.array([0.0, 0.5])
+
+    def loss_fn(branch_lengths, logit_model_parameters):
         return -compute_log_likelihood(
             branch_lengths, 
             mutation_priors, 
@@ -175,10 +181,25 @@ def optimize_parameters(
             internal_postorder, 
             internal_postorder_children, 
             inside_log_likelihoods, 
-            params, 
+            jax.nn.sigmoid(logit_model_parameters),
             character_matrix, 
             root
         )
+
+    loss_fn_grad = jax.jit(jax.value_and_grad(loss_fn, argnums=(0, 1)))
+
+    for i in range(GRAD_STEPS):
+        loss_value, grads = loss_fn_grad(branch_lengths, logit_model_parameters)
+
+        bgrad = jnp.where(jnp.isnan(grads[0]), 0.0, grads[0])
+        mgrad = jnp.where(jnp.isnan(grads[1]), 0.0, grads[1])
+
+        branch_lengths -= GRAD_STEP_SIZE * bgrad
+        logit_model_parameters -= GRAD_STEP_SIZE * mgrad
+
+        branch_lengths = jnp.maximum(branch_lengths, EPS)
+
+    return branch_lengths, jax.nn.sigmoid(logit_model_parameters)
 
 def compute_llh(phylo_opt):
     phylogeny = phylo_opt.phylogeny
@@ -208,15 +229,34 @@ def main(phylo_opt):
     internal_postorder = jnp.array(internal_postorder)
     internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
 
+    optimized_blens, optimized_model_params = optimize_parameters(
+        leaves,
+        internal_postorder,
+        internal_postorder_children,
+        phylo_opt.inside_log_likelihoods,
+        phylo_opt.model_parameters,
+        phylogeny.character_matrix,
+        phylo_opt.branch_lengths,
+        phylogeny.mutation_priors,
+        phylogeny.root
+    )
+
+    print("Optimized branch lengths:")
+    print(optimized_blens)
+
+    print("Optimized model parameters:")
+    print(optimized_model_params)
+
+    @jax.jit
     def llh_helper():
         return compute_log_likelihood(
-            phylo_opt.branch_lengths, 
+            optimized_blens,
             phylogeny.mutation_priors, 
             leaves, 
             internal_postorder, 
             internal_postorder_children, 
             phylo_opt.inside_log_likelihoods, 
-            phylo_opt.model_parameters, 
+            optimized_model_params,
             phylogeny.character_matrix, 
             phylogeny.root
         )
@@ -274,7 +314,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
-    branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
+
+    if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)):
+        lg.logger.error("Some branch lengths are missing. Setting them to 1.0.")
+        branch_lengths = jnp.ones(2 * n - 1)
+    else:
+        branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
+
     model_parameters = jnp.array([args.nu, args.phi])
     phylo_opt = phylogeny.PhylogenyOptimization(
         phylogeny=phylo, 
