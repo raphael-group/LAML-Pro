@@ -8,10 +8,17 @@ import jax
 import phylogeny
 import os
 
+import numpy as np
 import pandas as pd
 import networkx as nx
 import jax.numpy as jnp
 import loguru as lg
+
+from collections import defaultdict
+
+EPS = 1e-6
+GRAD_STEP_SIZE = 5e-4
+GRAD_STEPS = 250
 
 """ 
 LAML: Lineage Analysis with Maximum Likelihood 
@@ -27,10 +34,6 @@ of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
 
-EPS = 1e-6
-GRAD_STEP_SIZE = 5e-4
-GRAD_STEPS = 250
-
 def compute_internal_log_likelihoods(
     inside_log_likelihoods: jnp.array,
     internal_postorder: jnp.array,
@@ -40,6 +43,7 @@ def compute_internal_log_likelihoods(
     mutation_priors: jnp.array,
     root: int,
 ):
+    depth = internal_postorder[:, 1].max()
     ν = model_parameters[0]
     batch_size, num_nodes, alphabet_size = inside_log_likelihoods.shape
 
@@ -77,19 +81,26 @@ def compute_internal_log_likelihoods(
         return out
 
     def body_fun(i, inside_ll):
-        u = internal_postorder[i]
+        u = internal_postorder[i, 0]
         v, w = internal_postorder_children[i]
-
         llh_v = compute_child_llh(inside_ll, v)
         llh_w = compute_child_llh(inside_ll, w)
+        return llh_v + llh_w
 
-        inside_ll = inside_ll.at[:, u, :].set(llh_v + llh_w)
-        return inside_ll
+    i_vector = jnp.arange(internal_postorder.shape[0])
+    update_f = lambda inside_ll: jax.vmap(lambda i: body_fun(i, inside_ll))
 
-    num_internal = internal_postorder.shape[0]
-    inside_log_likelihoods = jax.lax.fori_loop(
-        0, num_internal, body_fun, inside_log_likelihoods
-    )
+    def fori_body(d, inside_ll):
+        cond = (internal_postorder[:, 1] == depth - d)[:, None, None]  # shape (249, 1, 1)
+
+        all_updates = jnp.where(
+            cond,
+            update_f(inside_ll)(i_vector),
+            inside_ll[:, internal_postorder[:, 0], :].transpose(1, 0, 2)
+        )
+        return inside_ll.at[:, internal_postorder[:,0], :].set(all_updates.transpose(1, 0, 2))
+
+    inside_log_likelihoods = jax.lax.fori_loop(0, depth + 1, fori_body, inside_log_likelihoods)
 
     inside_root_llh = compute_child_llh(inside_log_likelihoods, root)
     return inside_log_likelihoods, inside_root_llh
@@ -129,6 +140,7 @@ def initialize_leaf_inside_log_likelihoods(
     
     return jnp.log(inside_log_likelihoods)
 
+@jax.jit
 def compute_log_likelihood(
         branch_lengths : jnp.array,
         mutation_priors : jnp.array,
@@ -156,7 +168,6 @@ def compute_log_likelihood(
         mutation_priors,
         root
     )
-
     return inside_root_llh[:, 0].sum()
 
 def optimize_parameters(
@@ -205,10 +216,11 @@ def compute_llh(phylo_opt):
     phylogeny = phylo_opt.phylogeny
 
     leaves = jnp.array([n for n in phylogeny.tree.nodes() if phylogeny.tree.out_degree(n) == 0])
-    internal_postorder = [n for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
+    level_order = nx.single_source_shortest_path_length(phylogeny.tree, phylogeny.root)
+    internal_postorder = [[n, level_order[n]] for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
     internal_postorder = jnp.array(internal_postorder)
-    internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
-
+    internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder[:, 0]])
+ 
     return compute_log_likelihood(
         phylo_opt.branch_lengths, 
         phylogeny.mutation_priors, 
@@ -225,29 +237,14 @@ def main(phylo_opt):
     phylogeny = phylo_opt.phylogeny
 
     leaves = jnp.array([n for n in phylogeny.tree.nodes() if phylogeny.tree.out_degree(n) == 0])
-    internal_postorder = [n for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
+    level_order = nx.single_source_shortest_path_length(phylogeny.tree, phylogeny.root)
+    internal_postorder = [[n, level_order[n]] for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
     internal_postorder = jnp.array(internal_postorder)
-    internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
+    internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder[:, 0]])
+    
+    optimized_blens = phylo_opt.branch_lengths
+    optimized_model_params = phylo_opt.model_parameters
 
-    optimized_blens, optimized_model_params = optimize_parameters(
-        leaves,
-        internal_postorder,
-        internal_postorder_children,
-        phylo_opt.inside_log_likelihoods,
-        phylo_opt.model_parameters,
-        phylogeny.character_matrix,
-        phylo_opt.branch_lengths,
-        phylogeny.mutation_priors,
-        phylogeny.root
-    )
-
-    print("Optimized branch lengths:")
-    print(optimized_blens)
-
-    print("Optimized model parameters:")
-    print(optimized_model_params)
-
-    @jax.jit
     def llh_helper():
         return compute_log_likelihood(
             optimized_blens,
@@ -262,9 +259,9 @@ def main(phylo_opt):
         )
 
     llh_helper().block_until_ready()
-    NUM_ITER = 1000
+    NUM_ITER = 100
     llh = llh_helper()
-    runtime = timeit.timeit(lambda: llh_helper(), number=NUM_ITER) # timeit
+    runtime = timeit.timeit(lambda: llh_helper(), number=NUM_ITER)
     avg_runtime = runtime / NUM_ITER
 
     root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
