@@ -25,7 +25,7 @@ is ordered {0, 1, ..., A, -1}, where A is the size
 of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
-@jax.jit
+
 def compute_internal_log_likelihoods(
     inside_log_likelihoods: jnp.array,
     internal_postorder: jnp.array,
@@ -34,90 +34,61 @@ def compute_internal_log_likelihoods(
     model_parameters: jnp.array,
     mutation_priors: jnp.array,
     root: int,
-) -> jnp.array:
+):
     ν = model_parameters[0]
-    alphabet_size = inside_log_likelihoods.shape[2]
-    
-    # We'll define a child function that *accepts* the current inside_ll as a parameter
-    def compute_child_llh(inside_ll, z, blen, t1, t2, t3):
-        # We can hoist these out if we like, but let's keep it inline for clarity:
-        mask_alpha_last = jnp.arange(alphabet_size) == (alphabet_size - 1)
-        llh_case1 = jnp.where(
-            mask_alpha_last,
-            inside_ll[:, z, -1][:, None],  # Use inside_ll, not outer scope
-            0.0,
-        )
-        
-        mask_alpha_zero = jnp.arange(alphabet_size) == 0
-        summands = jnp.zeros((inside_ll.shape[0], alphabet_size))
-        summands = summands.at[:, 0].set(-blen * (1 + ν))
-        if alphabet_size > 2:
-            summands = summands.at[:, 1 : (alphabet_size - 1)].set(
-                t1 + jnp.log(mutation_priors) + t3
-            )
-        summands = summands.at[:, -1].set(t2)
-        # Again, read from inside_ll
-        logsumexp_val = jax.nn.logsumexp(summands + inside_ll[:, z, :], axis=1)
-        llh_case2 = jnp.where(mask_alpha_zero, logsumexp_val[:, None], 0.0)
+    batch_size, num_nodes, alphabet_size = inside_log_likelihoods.shape
 
-        mask_alpha_other = ~(mask_alpha_zero | mask_alpha_last)
-        term1 = t1 + inside_ll[:, z, :]
-        term2 = t2 + inside_ll[:, z, -1][:, None]
-        logaddexp_result = jnp.logaddexp(term1, term2)
-        llh_case3 = jnp.where(mask_alpha_other, logaddexp_result, 0.0)
-        
-        return llh_case1 + llh_case2 + llh_case3
+    log_mutation_priors = jnp.log(mutation_priors)
+
+    minus_blen_times_nu = -branch_lengths * ν
+    t1_array = minus_blen_times_nu
+    t2_array = jnp.log(1.0 - jnp.exp(minus_blen_times_nu))
+    t3_array = jnp.log(1.0 - jnp.exp(-branch_lengths))
+    alpha0_array = -branch_lengths * (1.0 + ν)  # for alpha=0 summand
+
+    def compute_child_llh(inside_ll, child_idx):
+        t1 = t1_array[child_idx]
+        t2 = t2_array[child_idx]
+        t3 = t3_array[child_idx]
+        alpha0_val = alpha0_array[child_idx]
+
+        col = inside_ll[:, child_idx, :]  # => (batch_size, alphabet_size)
+        out = jnp.zeros_like(col)
+
+        out = out.at[:, -1].set(col[:, -1])
+        summands = jnp.zeros_like(col)
+        summands = summands.at[:, 0].set(alpha0_val)
+        if alphabet_size > 2:
+            summands = summands.at[:, 1:-1].set(t1 + log_mutation_priors + t3)
+        summands = summands.at[:, -1].set(t2)
+
+        val_for_alpha0 = jax.nn.logsumexp(summands + col, axis=1)
+        out = out.at[:, 0].set(val_for_alpha0)
+
+        if alphabet_size > 2:
+            addexp_all = jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
+            out = out.at[:, 1:-1].set(addexp_all[:, 1:-1])
+
+        return out
 
     def body_fun(i, inside_ll):
         u = internal_postorder[i]
         v, w = internal_postorder_children[i]
-        bv = branch_lengths[v]
-        bw = branch_lengths[w]
-        
-        t1_v = -bv * ν
-        t2_v = jnp.log(1.0 - jnp.exp(-bv * ν))
-        t3_v = jnp.log(1.0 - jnp.exp(-bv))
 
-        t1_w = -bw * ν
-        t2_w = jnp.log(1.0 - jnp.exp(-bw * ν))
-        t3_w = jnp.log(1.0 - jnp.exp(-bw))
+        llh_v = compute_child_llh(inside_ll, v)
+        llh_w = compute_child_llh(inside_ll, w)
 
-        # Pass the carry (inside_ll) into compute_child_llh:
-        llh_v = compute_child_llh(inside_ll, v, bv, t1_v, t2_v, t3_v)
-        llh_w = compute_child_llh(inside_ll, w, bw, t1_w, t2_w, t3_w)
-
-        # Update the carry for the next iteration:
         inside_ll = inside_ll.at[:, u, :].set(llh_v + llh_w)
         return inside_ll
 
-    # Wrap the iteration over internal_postorder with fori_loop
     num_internal = internal_postorder.shape[0]
     inside_log_likelihoods = jax.lax.fori_loop(
-        0,
-        num_internal,
-        body_fun,
-        inside_log_likelihoods,
+        0, num_internal, body_fun, inside_log_likelihoods
     )
 
-    # Finally compute the root likelihood
-    blength_root = branch_lengths[root]
-    t1_root = -blength_root * ν
-    t2_root = jnp.log(1.0 - jnp.exp(-blength_root * ν))
-    t3_root = jnp.log(1.0 - jnp.exp(-blength_root))
-    
-    # Use the *final* inside_log_likelihoods from the loop:
-    inside_root_llh = compute_child_llh(
-        inside_log_likelihoods, 
-        root, 
-        blength_root, 
-        t1_root, 
-        t2_root, 
-        t3_root
-    )
-
+    inside_root_llh = compute_child_llh(inside_log_likelihoods, root)
     return inside_log_likelihoods, inside_root_llh
 
-@jax.jit
 def initialize_leaf_inside_log_likelihoods(
     inside_log_likelihoods : jnp.array, 
     leaves : jnp.array,
@@ -141,7 +112,7 @@ def initialize_leaf_inside_log_likelihoods(
     cond_4 = (leaf_chars_expanded == -1)                                             # (4) char==-1           
     
     conditions = [cond_1, cond_2, cond_3, cond_4]
-    choices    = [1.0, ϕ, 1.0 - ϕ, ϕ]
+    choices    = [1.0, 0, 1.0 - ϕ, ϕ]
     
     leaf_inside_probs = jnp.select(conditions, choices, default=0.0)
     leaf_inside_probs_T = jnp.swapaxes(leaf_inside_probs, 0, 1)  # now (C, L, A)
@@ -154,14 +125,14 @@ def initialize_leaf_inside_log_likelihoods(
 
 @jax.jit
 def compute_log_likelihood(
+        branch_lengths : jnp.array,
+        mutation_priors : jnp.array,
         leaves : jnp.array,
         internal_postorder : jnp.array,
         internal_postorder_children : jnp.array,
         inside_log_likelihoods : jnp.array,
         model_parameters : jnp.array,
         character_matrix : jnp.array,
-        branch_lengths : jnp.array,
-        mutation_priors : jnp.array,
         root : int
 ) -> jnp.array:
     inside_log_likelihoods = initialize_leaf_inside_log_likelihoods(
@@ -183,6 +154,32 @@ def compute_log_likelihood(
 
     return inside_root_llh[:, 0].sum()
 
+def optimize_parameters(
+    leaves : jnp.array,
+    internal_postorder : jnp.array,
+    internal_postorder_children : jnp.array,
+    inside_log_likelihoods : jnp.array,
+    model_parameters : jnp.array,
+    character_matrix : jnp.array,
+    branch_lengths : jnp.array,
+    mutation_priors : jnp.array,
+    root : int
+    ):
+    # take gradient of log likelihood with respect to model parameters and branch lengths
+
+    def loss_fn(params):
+        return -compute_log_likelihood(
+            branch_lengths, 
+            mutation_priors, 
+            leaves, 
+            internal_postorder, 
+            internal_postorder_children, 
+            inside_log_likelihoods, 
+            params, 
+            character_matrix, 
+            root
+        )
+
 def compute_llh(phylo_opt):
     phylogeny = phylo_opt.phylogeny
 
@@ -192,14 +189,14 @@ def compute_llh(phylo_opt):
     internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder])
 
     return compute_log_likelihood(
+        phylo_opt.branch_lengths, 
+        phylogeny.mutation_priors, 
         leaves, 
         internal_postorder, 
         internal_postorder_children, 
         phylo_opt.inside_log_likelihoods, 
         phylo_opt.model_parameters, 
         phylogeny.character_matrix, 
-        phylo_opt.branch_lengths, 
-        phylogeny.mutation_priors, 
         phylogeny.root
     )
 
@@ -213,14 +210,14 @@ def main(phylo_opt):
 
     def llh_helper():
         return compute_log_likelihood(
+            phylo_opt.branch_lengths, 
+            phylogeny.mutation_priors, 
             leaves, 
             internal_postorder, 
             internal_postorder_children, 
             phylo_opt.inside_log_likelihoods, 
             phylo_opt.model_parameters, 
             phylogeny.character_matrix, 
-            phylo_opt.branch_lengths, 
-            phylogeny.mutation_priors, 
             phylogeny.root
         )
 
@@ -238,7 +235,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("-c", "--character_matrix", help="Character matrix.", required=True)
     p.add_argument("-t", "--tree", help="Newick tree.", required=True)
-    p.add_argument("-p", "--priors", help="Mutation priors CSV.", required=True)
+    p.add_argument("-p", "--priors", help="Mutation priors CSV.")
     p.add_argument("--nu", help="Heritable silencing rate (ν).", type=float, default=0.0)
     p.add_argument("--phi", help="Sequencing dropout rate (ϕ).", type=float, default=0.0)
     return p.parse_args()
@@ -253,11 +250,24 @@ if __name__ == "__main__":
     character_matrix.replace("?", -1, inplace=True)
     character_matrix = character_matrix.astype(int)
 
-    priors = pd.read_csv(args.priors, sep=",", header=None)
-    priors.columns = ["character", "state", "probability"]
-    priors.character = priors.character.astype(int)
-    priors.state = priors.state.astype(int)
-    priors.set_index(["character", "state"], inplace=True)
+    if args.priors is None:
+        lg.logger.info("No mutation priors provided. Assuming uniform priors.")
+        rows = []
+        for i, c in enumerate(character_matrix.columns):
+            states = set(character_matrix[c].unique()) - set([0, -1])
+            num_states = len(states)
+            for s in states:
+                rows.append({"character": i, "state": s, "probability": 1.0 / num_states})
+        priors = pd.DataFrame(rows)
+        priors.character = priors.character.astype(int)
+        priors.state = priors.state.astype(int)
+        priors.set_index(["character", "state"], inplace=True)
+    else:
+        priors = pd.read_csv(args.priors, sep=",", header=None)
+        priors.columns = ["character", "state", "probability"]
+        priors.character = priors.character.astype(int)
+        priors.state = priors.state.astype(int)
+        priors.set_index(["character", "state"], inplace=True)
 
     if n != character_matrix.shape[0]:
         lg.logger.error("The tree and character matrix have different numbers of taxa.")
