@@ -47,7 +47,6 @@ build/
 *.eggs/
 *.venv/
 *.log
-*.csv
 *.dat
 *.out
 *.pid
