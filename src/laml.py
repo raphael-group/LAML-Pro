@@ -471,6 +471,10 @@ if __name__ == "__main__":
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
+    lg.logger.info(f"Using JAX backend with {jax.devices()} devices.")
+    lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
+    jax.config.update("jax_default_device", jax.devices()[-1])
+
     lg.logger.info(f"Tree has {n} taxa and {2 * n - 1} nodes.")
     lg.logger.info(f"Character matrix has {character_matrix.shape[1]} characters and an alphabet size of {phylo.max_alphabet_size}.")
     model_parameters = jnp.array([args.nu, args.phi])
