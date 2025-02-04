@@ -19,7 +19,7 @@ import optimistix as optx
 from collections import defaultdict
 
 EPS = 1e-6
-GRAD_STEP_SIZE = 5e-4
+GRAD_STEP_SIZE = 1e-2
 GRAD_STEPS = 250
 
 """ 
@@ -35,6 +35,105 @@ is ordered {0, 1, ..., A, -1}, where A is the size
 of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
+
+def compute_node_log_likelihood(
+    inside_ll : jnp.array,
+    child_idx  : int,
+    log_mutation_priors : jnp.array,
+    alphabet_size : int,
+    t1_array : jnp.array,
+    t2_array : jnp.array,
+    t3_array : jnp.array,
+    alpha0_array : jnp.array
+):
+    t1 = t1_array[child_idx]
+    t2 = t2_array[child_idx]
+    t3 = t3_array[child_idx]
+    alpha0_val = alpha0_array[child_idx]
+
+    col = inside_ll[:, child_idx, :]  # => (num_characters, alphabet_size)
+    out = jnp.zeros_like(col)
+
+    out = out.at[:, -1].set(col[:, -1])
+    summands = jnp.zeros_like(col)
+    summands = summands.at[:, 0].set(alpha0_val)
+    if alphabet_size > 2:
+        summands = summands.at[:, 1:-1].set(t1 + log_mutation_priors + t3)
+    summands = summands.at[:, -1].set(t2)
+
+    val_for_alpha0 = jax.nn.logsumexp(summands + col, axis=1)
+    out = out.at[:, 0].set(val_for_alpha0)
+
+    if alphabet_size > 2:
+        addexp_all = jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
+        out = out.at[:, 1:-1].set(addexp_all[:, 1:-1])
+
+    return out
+
+def compute_internal_log_likelihoods(
+    inside_log_likelihoods: jnp.array,
+    internal_postorder: jnp.array,
+    internal_postorder_children: jnp.array,
+    branch_lengths: jnp.array,
+    model_parameters: jnp.array,
+    mutation_priors: jnp.array,
+    root: int,
+):
+    """Computes log-likelihoods for internal nodes via a post-order traversal strategy
+    using Felsenstein's pruning algorithm. Takes O(num_characters * num_nodes * alphabet_size) 
+    time.
+
+    Args:
+        inside_log_likelihoods: Array of shape (num_characters, num_nodes, alphabet_size)
+            storing current log-likelihoods; will be updated for internal nodes.
+        internal_postorder: Array of shape (num_internal_nodes, 2) where each row is 
+            (node_id, depth) specifying post-order traversal order and depth information.
+        internal_postorder_children: Array of shape (num_internal_nodes, 2) where each row 
+            contains the child node indices for the corresponding internal node in internal_postorder.
+        branch_lengths: Array of shape (num_nodes,) storing branch lengths for each node.
+        model_parameters: Array where model_parameters[1] is ϕ (dropout rate).
+        mutation_priors: Array of shape (alphabet_size,) with prior probabilities for mutations.
+        root: Integer index of the root node.
+
+    Returns:
+        Tuple containing:
+        - Updated inside_log_likelihoods array with internal node values.
+        - Array of shape (num_characters, alphabet_size) with root node log-likelihoods.
+    """
+
+    ν = model_parameters[0]
+    num_characters, num_nodes, alphabet_size = inside_log_likelihoods.shape
+
+    log_mutation_priors = jnp.log(mutation_priors)
+
+    minus_blen_times_nu = -branch_lengths * ν
+    t1_array = minus_blen_times_nu
+    t2_array = jnp.log(jnp.where(-minus_blen_times_nu < EPS, EPS, 1.0 - jnp.exp(minus_blen_times_nu)))
+    t3_array  = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
+    alpha0_array = -branch_lengths * (1.0 + ν)  # for alpha=0 summand
+
+    def body_fun(i, inside_ll):
+        u = internal_postorder[i, 0]
+        v, w = internal_postorder_children[i]
+        llh_v = compute_node_log_likelihood(
+            inside_ll, v, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        )
+        llh_w = compute_node_log_likelihood(
+            inside_ll, w, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        )
+
+        inside_ll = inside_ll.at[:, u, :].set(llh_v + llh_w)
+        return inside_ll
+
+    num_internal = internal_postorder.shape[0]
+    inside_log_likelihoods = jax.lax.fori_loop(
+        0, num_internal, body_fun, inside_log_likelihoods
+    )
+
+    inside_root_llh = compute_node_log_likelihood(
+        inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+    )
+    return inside_log_likelihoods, inside_root_llh
 
 def compute_internal_log_likelihoods_depthwise(
     inside_log_likelihoods: jnp.array,
@@ -67,7 +166,7 @@ def compute_internal_log_likelihoods_depthwise(
     Notes:
         Uses a depth-based traversal strategy and JAX vectorization for efficient 
         computation, taking O(num_characters * num_nodes * alphabet_size * depth) time,
-        rather than the standard O(num_characters * num_nodes * alphabet_size^2) time, but 
+        rather than the standard O(num_characters * num_nodes * alphabet_size) time, but 
         performs each of the O(depth) steps completely in parallel.
     """
 
@@ -80,47 +179,26 @@ def compute_internal_log_likelihoods_depthwise(
 
     minus_blen_times_nu = -branch_lengths * ν
     t1_array = minus_blen_times_nu
-    t2_array = jnp.log(1.0 - jnp.exp(minus_blen_times_nu))
-    t3_array = jnp.log(1.0 - jnp.exp(-branch_lengths))
+    t2_array = jnp.log(jnp.where(-minus_blen_times_nu < EPS, EPS, 1.0 - jnp.exp(minus_blen_times_nu)))
+    t3_array = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
     alpha0_array = -branch_lengths * (1.0 + ν)  # for alpha=0 summand
-
-    def compute_child_llh(inside_ll, child_idx):
-        t1 = t1_array[child_idx]
-        t2 = t2_array[child_idx]
-        t3 = t3_array[child_idx]
-        alpha0_val = alpha0_array[child_idx]
-
-        col = inside_ll[:, child_idx, :]  # => (num_characters, alphabet_size)
-        out = jnp.zeros_like(col)
-
-        out = out.at[:, -1].set(col[:, -1])
-        summands = jnp.zeros_like(col)
-        summands = summands.at[:, 0].set(alpha0_val)
-        if alphabet_size > 2:
-            summands = summands.at[:, 1:-1].set(t1 + log_mutation_priors + t3)
-        summands = summands.at[:, -1].set(t2)
-
-        val_for_alpha0 = jax.nn.logsumexp(summands + col, axis=1)
-        out = out.at[:, 0].set(val_for_alpha0)
-
-        if alphabet_size > 2:
-            addexp_all = jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
-            out = out.at[:, 1:-1].set(addexp_all[:, 1:-1])
-
-        return out
 
     def body_fun(i, inside_ll):
         u = internal_postorder[i, 0]
         v, w = internal_postorder_children[i]
-        llh_v = compute_child_llh(inside_ll, v)
-        llh_w = compute_child_llh(inside_ll, w)
+        llh_v = compute_node_log_likelihood(
+            inside_ll, v, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        )
+        llh_w = compute_node_log_likelihood(
+            inside_ll, w, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        )
         return llh_v + llh_w
 
     i_vector = jnp.arange(internal_postorder.shape[0])
     update_f = lambda inside_ll: jax.vmap(lambda i: body_fun(i, inside_ll))
 
     def fori_body(d, inside_ll):
-        cond = (internal_postorder[:, 1] == depth - d)[:, None, None]  # shape (249, 1, 1)
+        cond = (internal_postorder[:, 1] == depth - d)[:, None, None]
 
         all_updates = jnp.where(
             cond,
@@ -131,7 +209,9 @@ def compute_internal_log_likelihoods_depthwise(
 
     inside_log_likelihoods = jax.lax.fori_loop(0, depth + 1, fori_body, inside_log_likelihoods)
 
-    inside_root_llh = compute_child_llh(inside_log_likelihoods, root)
+    inside_root_llh = compute_node_log_likelihood(
+        inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+    )
     return inside_log_likelihoods, inside_root_llh
 
 def initialize_leaf_inside_log_likelihoods(
@@ -177,6 +257,7 @@ def initialize_leaf_inside_log_likelihoods(
     leaf_inside_probs = jnp.select(conditions, choices, default=0.0)
     leaf_inside_probs_T = jnp.swapaxes(leaf_inside_probs, 0, 1)  # now (C, L, A)
     
+    inside_log_likelihoods = EPS * jnp.ones_like(inside_log_likelihoods) 
     inside_log_likelihoods = inside_log_likelihoods.at[:, leaves, :].set(
         leaf_inside_probs_T
     )
@@ -219,7 +300,7 @@ def compute_log_likelihood(
         character_matrix
     )
 
-    inside_log_likelihoods, inside_root_llh = compute_internal_log_likelihoods(
+    inside_log_likelihoods, inside_root_llh = compute_internal_log_likelihoods_depthwise(
         inside_log_likelihoods, 
         internal_postorder,
         internal_postorder_children,
@@ -259,11 +340,19 @@ def optimize_parameters(
             root
         )
 
+    grad_fn = jax.jit(jax.value_and_grad(loss_fn))
+    for i in range(100):
+        loss, grad = grad_fn((log_branch_lengths, logit_model_parameters), None)
+        print(jnp.exp(log_branch_lengths), jax.nn.sigmoid(logit_model_parameters))
+        log_branch_lengths -= GRAD_STEP_SIZE * grad[0]
+        logit_model_parameters -= GRAD_STEP_SIZE * grad[1]
+        lg.logger.info(f"Step {i}: Loss = {loss}")
+
     starting_params = (log_branch_lengths, logit_model_parameters)
     solver = optx.BFGS(atol=1e-4, rtol=1e-4)
     optx.minimise(loss_fn, solver, starting_params)
 
-    return jax.exp(log_branch_lengths), jax.nn.sigmoid(logit_model_parameters)
+    return jnp.exp(log_branch_lengths), jax.nn.sigmoid(logit_model_parameters)
 
 def main(mode, phylo_opt):
     phylogeny = phylo_opt.phylogeny
@@ -288,7 +377,7 @@ def main(mode, phylo_opt):
                 phylogeny.root
             )
 
-        llh_helper = jax.jit(llh_helper, backend="cpu")
+        llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
         NUM_ITER = 100
         llh = llh_helper()
