@@ -18,10 +18,6 @@ import optimistix as optx
 
 from collections import defaultdict
 
-EPS = 1e-6
-GRAD_STEP_SIZE = 1e-2
-GRAD_STEPS = 250
-
 """ 
 LAML: Lineage Analysis with Maximum Likelihood 
 
@@ -35,6 +31,10 @@ is ordered {0, 1, ..., A, -1}, where A is the size
 of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
+
+EPS = 1e-6
+ABSOLUTE_TOLERANCE = 1e-1
+RELATIVE_TOLERANCE = 1e-1
 
 def compute_node_log_likelihood(
     inside_ll : jnp.array,
@@ -91,7 +91,7 @@ def compute_internal_log_likelihoods(
         internal_postorder_children: Array of shape (num_internal_nodes, 2) where each row 
             contains the child node indices for the corresponding internal node in internal_postorder.
         branch_lengths: Array of shape (num_nodes,) storing branch lengths for each node.
-        model_parameters: Array where model_parameters[1] is ϕ (dropout rate).
+        model_parameters: Array with [ν, ϕ] (heritable silencing rate, sequencing dropout rate).
         mutation_priors: Array of shape (alphabet_size,) with prior probabilities for mutations.
         root: Integer index of the root node.
 
@@ -154,7 +154,7 @@ def compute_internal_log_likelihoods_depthwise(
         internal_postorder_children: Array of shape (num_internal_nodes, 2) where each row 
             contains the child node indices for the corresponding internal node in internal_postorder.
         branch_lengths: Array of shape (num_nodes,) storing branch lengths for each node.
-        model_parameters: Array where model_parameters[1] is ϕ (dropout rate).
+        model_parameters: Array with [ν, ϕ] (heritable silencing rate, sequencing dropout rate).
         mutation_priors: Array of shape (alphabet_size,) with prior probabilities for mutations.
         root: Integer index of the root node.
 
@@ -344,7 +344,7 @@ def optimize_parameters(
         )
 
     starting_params = (log_branch_lengths, logit_model_parameters)
-    solver = optx.BFGS(atol=1e-2, rtol=1e-2)
+    solver = optx.BFGS(atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE)
     res = optx.minimise(loss_fn, solver, starting_params)
 
     branch_lengths = jnp.exp(res.value[0])
@@ -414,7 +414,7 @@ def main(mode, phylo_opt):
         lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
         lg.logger.info(f"Optimized negative log likelihood: {nllh}")
         lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
-        lg.logger.info(f"Optimized model parameters: {model_parameters}")
+        lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
         return branch_lengths, model_parameters
 
 def parse_args():
@@ -462,12 +462,17 @@ if __name__ == "__main__":
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
 
-    if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)):
-        lg.logger.error("Some branch lengths are missing. Setting them to 1.0.")
+    if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)) or args.mode == "optimize":
+        if args.mode == "optimize":
+            lg.logger.info("Optimization mode. Initializing all branch lengths to 1.0.")
+        else:
+            lg.logger.error("Some branch lengths are missing. Initializing all branch lengths to 1.0.")
         branch_lengths = jnp.ones(2 * n - 1)
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
+    lg.logger.info(f"Tree has {n} taxa and {2 * n - 1} nodes.")
+    lg.logger.info(f"Character matrix has {character_matrix.shape[1]} characters and an alphabet size of {phylo.max_alphabet_size}.")
     model_parameters = jnp.array([args.nu, args.phi])
     phylo_opt = phylogeny.PhylogenyOptimization(
         phylogeny=phylo, 
