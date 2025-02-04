@@ -323,8 +323,11 @@ def optimize_parameters(
     root : int
     ):
 
-    log_branch_lengths = jnp.log(branch_lengths)
+    model_parameters = jnp.maximum(model_parameters, EPS)
+    model_parameters = jnp.minimum(model_parameters, 1.0 - EPS)
+
     logit_model_parameters = jnp.log(model_parameters / (1.0 - model_parameters))
+    log_branch_lengths = jnp.log(jnp.maximum(branch_lengths, EPS))
 
     def loss_fn(parameters, args):
         log_branch_lengths, logit_model_parameters = parameters
@@ -340,19 +343,14 @@ def optimize_parameters(
             root
         )
 
-    grad_fn = jax.jit(jax.value_and_grad(loss_fn))
-    for i in range(100):
-        loss, grad = grad_fn((log_branch_lengths, logit_model_parameters), None)
-        print(jnp.exp(log_branch_lengths), jax.nn.sigmoid(logit_model_parameters))
-        log_branch_lengths -= GRAD_STEP_SIZE * grad[0]
-        logit_model_parameters -= GRAD_STEP_SIZE * grad[1]
-        lg.logger.info(f"Step {i}: Loss = {loss}")
-
     starting_params = (log_branch_lengths, logit_model_parameters)
-    solver = optx.BFGS(atol=1e-4, rtol=1e-4)
-    optx.minimise(loss_fn, solver, starting_params)
+    solver = optx.BFGS(atol=1e-2, rtol=1e-2)
+    res = optx.minimise(loss_fn, solver, starting_params)
 
-    return jnp.exp(log_branch_lengths), jax.nn.sigmoid(logit_model_parameters)
+    branch_lengths = jnp.exp(res.value[0])
+    model_parameters = jax.nn.sigmoid(res.value[1])
+    nllh = -loss_fn(res.value, None)
+    return nllh, branch_lengths, model_parameters
 
 def main(mode, phylo_opt):
     phylogeny = phylo_opt.phylogeny
@@ -389,17 +387,32 @@ def main(mode, phylo_opt):
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
         return llh
     elif mode == "optimize":
-        branch_lengths, model_parameters = optimize_parameters(
-            leaves, 
-            internal_postorder, 
-            internal_postorder_children, 
-            phylo_opt.inside_log_likelihoods, 
-            phylo_opt.model_parameters, 
-            phylogeny.character_matrix, 
-            phylo_opt.branch_lengths, 
-            phylogeny.mutation_priors, 
-            phylogeny.root
-        )
+        def optimize_helper():
+            return optimize_parameters(
+                leaves, 
+                internal_postorder, 
+                internal_postorder_children, 
+                phylo_opt.inside_log_likelihoods, 
+                phylo_opt.model_parameters, 
+                phylogeny.character_matrix, 
+                phylo_opt.branch_lengths, 
+                phylogeny.mutation_priors, 
+                phylogeny.root
+            )
+
+        start = time.time()
+        optimize_helper = jax.jit(optimize_helper)
+        optimize_helper()[0].block_until_ready()
+        end = time.time()
+        compile_time = end - start
+
+        start = time.time()
+        nllh, branch_lengths, model_parameters = optimize_helper()
+        nllh.block_until_ready()
+        end = time.time()
+
+        lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
+        lg.logger.info(f"Optimized negative log likelihood: {nllh}")
         lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
         lg.logger.info(f"Optimized model parameters: {model_parameters}")
         return branch_lengths, model_parameters
