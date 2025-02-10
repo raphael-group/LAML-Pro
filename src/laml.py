@@ -15,8 +15,8 @@ import jax.numpy as jnp
 import loguru as lg
 import optimistix as optx
 
-
 from collections import defaultdict
+from typing import Callable
 
 """ 
 LAML: Lineage Analysis with Maximum Likelihood 
@@ -52,9 +52,7 @@ def compute_node_log_likelihood(
     alpha0_val = alpha0_array[child_idx]
 
     col = inside_ll[:, child_idx, :]  # => (num_characters, alphabet_size)
-    out = jnp.zeros_like(col)
 
-    out = out.at[:, -1].set(col[:, -1])
     summands = jnp.zeros_like(col)
     summands = summands.at[:, 0].set(alpha0_val)
     if alphabet_size > 2:
@@ -62,12 +60,17 @@ def compute_node_log_likelihood(
     summands = summands.at[:, -1].set(t2)
 
     val_for_alpha0 = jax.nn.logsumexp(summands + col, axis=1)
-    out = out.at[:, 0].set(val_for_alpha0)
 
-    if alphabet_size > 2:
-        addexp_all = jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
-        out = out.at[:, 1:-1].set(addexp_all[:, 1:-1])
-
+    idx = jnp.arange(alphabet_size)[None, :]  # shape (1, alphabet_size)
+    out = jnp.where(
+        idx == 0,
+        val_for_alpha0[:, None],
+        jnp.where(
+            idx == (alphabet_size - 1),
+            inside_ll[:, child_idx, -1, None],
+            jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
+        )
+    )
     return out
 
 def compute_internal_log_likelihoods(
@@ -205,10 +208,10 @@ def compute_internal_log_likelihoods_depthwise(
             update_f(inside_ll)(i_vector),
             inside_ll[:, internal_postorder[:, 0], :].transpose(1, 0, 2)
         )
+
         return inside_ll.at[:, internal_postorder[:,0], :].set(all_updates.transpose(1, 0, 2))
 
     inside_log_likelihoods = jax.lax.fori_loop(0, depth + 1, fori_body, inside_log_likelihoods)
-
     inside_root_llh = compute_node_log_likelihood(
         inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
     )
@@ -312,6 +315,7 @@ def compute_log_likelihood(
     return inside_root_llh[:, 0].sum()
 
 def optimize_parameters(
+        i,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -323,8 +327,8 @@ def optimize_parameters(
     root : int
     ):
 
-    model_parameters = jnp.maximum(model_parameters, EPS)
-    model_parameters = jnp.minimum(model_parameters, 1.0 - EPS)
+    model_parameters = jnp.maximum(model_parameters, EPS / (i + 1))
+    model_parameters = jnp.minimum(model_parameters, 1.0 - EPS / (i + 1))
 
     logit_model_parameters = jnp.log(model_parameters / (1.0 - model_parameters))
     log_branch_lengths = jnp.log(jnp.maximum(branch_lengths, EPS))
@@ -377,7 +381,7 @@ def main(mode, phylo_opt):
 
         llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
-        NUM_ITER = 100
+        NUM_ITER = 50
         llh = llh_helper()
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
         avg_runtime = runtime / NUM_ITER
@@ -387,8 +391,9 @@ def main(mode, phylo_opt):
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
         return llh
     elif mode == "optimize":
-        def optimize_helper():
+        def optimize_helper(i):
             return optimize_parameters(
+                i,
                 leaves, 
                 internal_postorder, 
                 internal_postorder_children, 
@@ -402,12 +407,14 @@ def main(mode, phylo_opt):
 
         start = time.time()
         optimize_helper = jax.jit(optimize_helper)
-        optimize_helper()[0].block_until_ready()
+        optimize_helper(0)[0].block_until_ready()
         end = time.time()
         compile_time = end - start
 
+
         start = time.time()
-        nllh, branch_lengths, model_parameters = optimize_helper()
+        # scores = jax.vmap(optimize_helper)(jnp.arange(50)).block_until_ready()
+        nllh, branch_lengths, model_parameters = optimize_helper(0)
         nllh.block_until_ready()
         end = time.time()
 
@@ -471,9 +478,9 @@ if __name__ == "__main__":
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
-    lg.logger.info(f"Using JAX backend with {jax.devices()} devices.")
-    lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
-    jax.config.update("jax_default_device", jax.devices()[-1])
+    # lg.logger.info(f"Using JAX backend with {jax.devices()} devices.")
+    # lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
+    # jax.config.update("jax_default_device", jax.devices()[-1])
 
     lg.logger.info(f"Tree has {n} taxa and {2 * n - 1} nodes.")
     lg.logger.info(f"Character matrix has {character_matrix.shape[1]} characters and an alphabet size of {phylo.max_alphabet_size}.")
