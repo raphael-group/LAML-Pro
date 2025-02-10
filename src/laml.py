@@ -7,6 +7,7 @@ import sys
 import jax
 import phylogeny
 import os
+import json
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,7 @@ of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
 
+DEPTH = 10
 EPS = 1e-6
 ABSOLUTE_TOLERANCE = 1e-1
 RELATIVE_TOLERANCE = 1e-1
@@ -178,8 +180,7 @@ def compute_internal_log_likelihoods_depthwise(
         performs each of the O(depth) steps completely in parallel.
     """
 
-    # depth = internal_postorder[:, 1].max()
-    depth = 20
+    depth = DEPTH
     ν = model_parameters[0]
     num_characters, num_nodes, alphabet_size = inside_log_likelihoods.shape
 
@@ -360,7 +361,7 @@ def optimize_parameters(
         )
 
     starting_params = (log_branch_lengths, logit_model_parameters)
-    solver = optx.BFGS(atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE)
+    solver = optx.BFGS(atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE)#, verbose=frozenset({"step_size", "loss"}))
     res = optx.minimise(loss_fn, solver, starting_params)
 
     branch_lengths = jnp.exp(res.value[0])
@@ -401,7 +402,6 @@ def main(mode, phylo_opt):
         root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
         lg.logger.info(f"Log likelihood at root {root}: {llh}")
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
-        return llh
     elif mode == "optimize":
         def optimize_helper(i):
             return optimize_parameters(
@@ -434,13 +434,24 @@ def main(mode, phylo_opt):
         lg.logger.info(f"Optimized negative log likelihood(s): {nllh}")
         lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
         lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
-        return branch_lengths, model_parameters
+
+        with open(f"{args.output}_results.json", "w") as f:
+            res = {
+                "nllh": -nllh.item(),
+                "nu": model_parameters[0].item(),
+                "phi": model_parameters[1].item(),
+                "runtime": end - start,
+                "compile_time": compile_time
+            }
+
+            f.write(json.dumps(res))
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("-c", "--character_matrix", help="Character matrix.", required=True)
     p.add_argument("-t", "--tree", help="Newick tree.", required=True)
     p.add_argument("-p", "--priors", help="Mutation priors CSV.")
+    p.add_argument("-o", "--output", help="Prefix for output files.", default="output")
     p.add_argument("--nu", help="Heritable silencing rate (ν).", type=float, default=0.0)
     p.add_argument("--phi", help="Sequencing dropout rate (ϕ).", type=float, default=0.0)
     p.add_argument("--mode", help="Algorithm mode.", default="score", choices=["score", "optimize", "time_llh"])
@@ -490,11 +501,16 @@ if __name__ == "__main__":
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
-    # lg.logger.info(f"Using JAX backend with {jax.devices()} devices.")
-    # lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
-    # jax.config.update("jax_default_device", jax.devices()[-1])
+    lg.logger.info(f"Using JAX backend with {jax.devices()} devices.")
+    lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
+    jax.config.update("jax_default_device", jax.devices()[-1])
+
+    depths = nx.single_source_shortest_path_length(tree, phylo.root)
+    max_depth = max(depths.values())
+    DEPTH = max_depth
 
     lg.logger.info(f"Tree has {n} taxa and {2 * n - 1} nodes.")
+    lg.logger.info(f"Tree depth: {max_depth}")
     lg.logger.info(f"Character matrix has {character_matrix.shape[1]} characters and an alphabet size of {phylo.max_alphabet_size}.")
     model_parameters = jnp.array([args.nu, args.phi])
     phylo_opt = phylogeny.PhylogenyOptimization(
