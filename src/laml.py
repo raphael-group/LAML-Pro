@@ -14,6 +14,7 @@ import networkx as nx
 import jax.numpy as jnp
 import loguru as lg
 import optimistix as optx
+import equinox.internal as eqxi
 
 from collections import defaultdict
 from typing import Callable
@@ -115,7 +116,8 @@ def compute_internal_log_likelihoods(
     t3_array  = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
     alpha0_array = -branch_lengths * (1.0 + ν)  # for alpha=0 summand
 
-    def body_fun(i, inside_ll):
+    def scan_body_fun(carry, i):
+        inside_ll = carry
         u = internal_postorder[i, 0]
         v, w = internal_postorder_children[i]
         llh_v = compute_node_log_likelihood(
@@ -126,11 +128,14 @@ def compute_internal_log_likelihoods(
         )
 
         inside_ll = inside_ll.at[:, u, :].set(llh_v + llh_w)
-        return inside_ll
+        return inside_ll, None
 
+    # Using Equinox's internal scan to accumulate the result
+    # due to an XLA bug with JAX's scan: 
+    #      https://github.com/jax-ml/jax/issues/10197
     num_internal = internal_postorder.shape[0]
-    inside_log_likelihoods = jax.lax.fori_loop(
-        0, num_internal, body_fun, inside_log_likelihoods
+    inside_log_likelihoods, _ = eqxi.scan(
+        scan_body_fun, inside_log_likelihoods, jnp.arange(num_internal), kind="checkpointed", buffers=lambda B: B, checkpoints="all"
     )
 
     inside_root_llh = compute_node_log_likelihood(
@@ -174,7 +179,7 @@ def compute_internal_log_likelihoods_depthwise(
     """
 
     # depth = internal_postorder[:, 1].max()
-    depth = 10
+    depth = 20
     ν = model_parameters[0]
     num_characters, num_nodes, alphabet_size = inside_log_likelihoods.shape
 
@@ -200,7 +205,8 @@ def compute_internal_log_likelihoods_depthwise(
     i_vector = jnp.arange(internal_postorder.shape[0])
     update_f = lambda inside_ll: jax.vmap(lambda i: body_fun(i, inside_ll))
 
-    def fori_body(d, inside_ll):
+    def scan_body(carry, d):
+        inside_ll = carry
         cond = (internal_postorder[:, 1] == depth - d)[:, None, None]
 
         all_updates = jnp.where(
@@ -209,9 +215,14 @@ def compute_internal_log_likelihoods_depthwise(
             inside_ll[:, internal_postorder[:, 0], :].transpose(1, 0, 2)
         )
 
-        return inside_ll.at[:, internal_postorder[:,0], :].set(all_updates.transpose(1, 0, 2))
+        return inside_ll.at[:, internal_postorder[:,0], :].set(all_updates.transpose(1, 0, 2)), None
 
-    inside_log_likelihoods = jax.lax.fori_loop(0, depth + 1, fori_body, inside_log_likelihoods)
+    # Using Equinox's internal scan to accumulate the result
+    # due to an XLA bug with JAX's scan: 
+    #      https://github.com/jax-ml/jax/issues/10197
+    inside_log_likelihoods, _ = eqxi.scan(
+        scan_body, inside_log_likelihoods, jnp.arange(depth + 1), kind="checkpointed", buffers=lambda B: B, checkpoints="all"
+    )
     inside_root_llh = compute_node_log_likelihood(
         inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
     )
@@ -312,10 +323,11 @@ def compute_log_likelihood(
         mutation_priors,
         root
     )
+
     return inside_root_llh[:, 0].sum()
 
 def optimize_parameters(
-        i,
+    i,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -381,7 +393,7 @@ def main(mode, phylo_opt):
 
         llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
-        NUM_ITER = 50
+        NUM_ITER = 200
         llh = llh_helper()
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
         avg_runtime = runtime / NUM_ITER
@@ -411,15 +423,15 @@ def main(mode, phylo_opt):
         end = time.time()
         compile_time = end - start
 
+        end = time.time()
 
         start = time.time()
-        # scores = jax.vmap(optimize_helper)(jnp.arange(50)).block_until_ready()
         nllh, branch_lengths, model_parameters = optimize_helper(0)
         nllh.block_until_ready()
         end = time.time()
 
         lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
-        lg.logger.info(f"Optimized negative log likelihood: {nllh}")
+        lg.logger.info(f"Optimized negative log likelihood(s): {nllh}")
         lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
         lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
         return branch_lengths, model_parameters
