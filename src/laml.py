@@ -243,7 +243,7 @@ def initialize_leaf_inside_log_likelihoods(
         leaves: Array of leaf node indices to initialize.
         model_parameters: Array with [ν, ϕ] (heritable silencing rate, sequencing dropout rate).
         character_matrix: Array of shape (num_leaves, num_characters) storing observed states,
-            where values are in {0 (missing), 1,...,A-1 (valid states), -1 (unknown)}.
+            where values are in {0 (missing), 1,..., A-1 (valid states), -1 (unknown)}.
 
     Returns:
         Array of same shape as inside_log_likelihoods with leaf log-likelihoods initialized.
@@ -362,7 +362,7 @@ def optimize_parameters(
 
     starting_params = (log_branch_lengths, logit_model_parameters)
     solver = optx.BFGS(atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE)#, verbose=frozenset({"step_size", "loss"}))
-    res = optx.minimise(loss_fn, solver, starting_params)
+    res = optx.minimise(loss_fn, solver, starting_params, max_steps=2500)
 
     branch_lengths = jnp.exp(res.value[0])
     model_parameters = jax.nn.sigmoid(res.value[1])
