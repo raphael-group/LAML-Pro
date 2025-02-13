@@ -2,10 +2,10 @@ import jax
 import jax.numpy as jnp
 import equinox.internal as eqxi
 
-DEPTH = 1
+DEPTH = 10
 EPS = 1e-6
 
-def compute_node_log_likelihood(
+def compute_edge_log_likelihood(
     inside_ll : jnp.array,
     child_idx  : int,
     log_mutation_priors : jnp.array,
@@ -15,6 +15,11 @@ def compute_node_log_likelihood(
     t3_array : jnp.array,
     alpha0_array : jnp.array
 ):
+    """
+    Computes the edge inside log-likelihood P((u, v) | a) for a single
+    character and state provided the log-likelihood of v.
+    """
+    
     t1 = t1_array[child_idx]
     t2 = t2_array[child_idx]
     t3 = t3_array[child_idx]
@@ -88,10 +93,10 @@ def compute_internal_log_likelihoods(
         inside_ll = carry
         u = internal_postorder[i, 0]
         v, w = internal_postorder_children[i]
-        llh_v = compute_node_log_likelihood(
+        llh_v = compute_edge_log_likelihood(
             inside_ll, v, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
         )
-        llh_w = compute_node_log_likelihood(
+        llh_w = compute_edge_log_likelihood(
             inside_ll, w, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
         )
 
@@ -106,7 +111,7 @@ def compute_internal_log_likelihoods(
         scan_body_fun, inside_log_likelihoods, jnp.arange(num_internal), kind="checkpointed", buffers=lambda B: B, checkpoints="all"
     )
 
-    inside_root_llh = compute_node_log_likelihood(
+    inside_root_llh = compute_edge_log_likelihood(
         inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
     )
     return inside_log_likelihoods, inside_root_llh
@@ -161,10 +166,10 @@ def compute_internal_log_likelihoods_depthwise(
     def body_fun(i, inside_ll):
         u = internal_postorder[i, 0]
         v, w = internal_postorder_children[i]
-        llh_v = compute_node_log_likelihood(
+        llh_v = compute_edge_log_likelihood(
             inside_ll, v, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
         )
-        llh_w = compute_node_log_likelihood(
+        llh_w = compute_edge_log_likelihood(
             inside_ll, w, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
         )
         return llh_v + llh_w
@@ -190,7 +195,7 @@ def compute_internal_log_likelihoods_depthwise(
     inside_log_likelihoods, _ = eqxi.scan(
         scan_body, inside_log_likelihoods, jnp.arange(depth + 1), kind="checkpointed", buffers=lambda B: B, checkpoints="all"
     )
-    inside_root_llh = compute_node_log_likelihood(
+    inside_root_llh = compute_edge_log_likelihood(
         inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
     )
     return inside_log_likelihoods, inside_root_llh
@@ -245,16 +250,53 @@ def initialize_leaf_inside_log_likelihoods(
     
     return jnp.log(inside_log_likelihoods)
 
+def compute_edge_inside_log_likelihoods(
+    branch_lengths : jnp.array,
+    mutation_priors : jnp.array,
+    inside_log_likelihoods : jnp.array,
+    model_parameters : jnp.array
+) -> jnp.array:
+    """Computes the edge inside log-likelihoods for all edges in the phylogeny. 
+
+    Args:
+        branch_lengths: Array of shape (num_nodes,) with branch lengths.
+        mutation_priors: Array of shape (alphabet_size,) with mutation priors.
+        inside_log_likelihoods: Pre-allocated array for likelihood computations.
+        model_parameters: Array with [ν, ϕ] (heritable silencing rate, sequencing dropout rate).
+    Returns:
+        An array edge_inside_log_likelihoods with shape (num_characters, 2 * num_nodes - 1, alphabet_size) 
+        containing the edge inside log-likelihoods, where edge_inside_log_likelihoods[c, v, a] is the
+        edge inside log-likelihood for character c, edge (u, v), with state a.
+    """
+    num_nodes = branch_lengths.shape[0]
+    alphabet_size  = inside_log_likelihoods.shape[2]
+    ν = model_parameters[0]
+    log_mutation_priors = jnp.log(mutation_priors)
+
+    minus_blen_times_nu = -branch_lengths * ν
+    t1_array = minus_blen_times_nu
+    t2_array = jnp.log(jnp.where(-minus_blen_times_nu < EPS, EPS, 1.0 - jnp.exp(minus_blen_times_nu)))
+    t3_array = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
+    alpha0_array = -branch_lengths * (1.0 + ν)  # for alpha=0 summand
+
+    edge_inside_log_likelihoods = jax.vmap(
+        lambda node_idx: compute_edge_log_likelihood(
+            inside_log_likelihoods, node_idx, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        )
+    )(jnp.arange(num_nodes))
+
+    return edge_inside_log_likelihoods.transpose(1, 0, 2)
+
 def compute_log_likelihood(
-        branch_lengths : jnp.array,
-        mutation_priors : jnp.array,
-        leaves : jnp.array,
-        internal_postorder : jnp.array,
-        internal_postorder_children : jnp.array,
-        inside_log_likelihoods : jnp.array,
-        model_parameters : jnp.array,
-        character_matrix : jnp.array,
-        root : int
+    branch_lengths : jnp.array,
+    mutation_priors : jnp.array,
+    leaves : jnp.array,
+    internal_postorder : jnp.array,
+    internal_postorder_children : jnp.array,
+    inside_log_likelihoods : jnp.array,
+    model_parameters : jnp.array,
+    character_matrix : jnp.array,
+    root : int
 ) -> jnp.array:
     """Computes the total log-likelihood of observed character matrix given 
     a phylogeny with branch lengths and model parameters.
@@ -290,5 +332,15 @@ def compute_log_likelihood(
         mutation_priors,
         root
     )
+
+    edge_inside_log_likelihoods = compute_edge_inside_log_likelihoods(
+        branch_lengths, 
+        mutation_priors, 
+        inside_log_likelihoods, 
+        model_parameters
+    )
+
+    print(edge_inside_log_likelihoods.shape)
+    print(inside_log_likelihoods.shape)
 
     return inside_root_llh[:, 0].sum()

@@ -49,7 +49,7 @@ def optimize_parameters(
     branch_lengths : jnp.array,
     mutation_priors : jnp.array,
     root : int
-    ):
+):
 
     model_parameters = jnp.maximum(model_parameters, calc.EPS / (i + 1))
     model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS / (i + 1))
