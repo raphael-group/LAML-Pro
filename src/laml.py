@@ -121,9 +121,9 @@ def main(mode, phylo_opt):
                 phylogeny.root
             )
 
-        #llh_helper = jax.jit(llh_helper)
+        llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
-        NUM_ITER = 2
+        NUM_ITER = 200
         llh = llh_helper()
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
         avg_runtime = runtime / NUM_ITER

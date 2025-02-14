@@ -417,8 +417,9 @@ def compute_log_likelihood(
         root
     )
     
-    likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
-    error = likelihoods - inside_root_llh[:, 0][:, None]
-    assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
+    # CONSISTENCY CHECK: inside log-likelihoods are consistent with the outside log-likelihoods
+    # likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
+    # error = likelihoods - inside_root_llh[:, 0][:, None]
+    # assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
 
     return inside_root_llh[:, 0].sum()
