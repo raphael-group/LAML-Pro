@@ -43,6 +43,8 @@ def optimize_parameters(
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
+    parent_sibling : jnp.array,
+    level_order : jnp.array,
     inside_log_likelihoods : jnp.array,
     model_parameters : jnp.array,
     character_matrix : jnp.array,
@@ -65,6 +67,8 @@ def optimize_parameters(
             leaves, 
             internal_postorder, 
             internal_postorder_children, 
+            parent_sibling,
+            level_order,
             inside_log_likelihoods, 
             jax.nn.sigmoid(logit_model_parameters),
             character_matrix, 
@@ -88,6 +92,18 @@ def main(mode, phylo_opt):
     internal_postorder = [[n, level_order[n]] for n in nx.dfs_postorder_nodes(phylogeny.tree, phylogeny.root) if phylogeny.tree.out_degree(n) > 0]
     internal_postorder = jnp.array(internal_postorder)
     internal_postorder_children = jnp.array([list(phylogeny.tree.successors(int(n))) for n in internal_postorder[:, 0]])
+    level_order_jax = jnp.array([level_order[n] for n in range(2 * phylogeny.num_leaves - 1)])
+    
+    parent_sibling = []
+    for i in range(2 * phylogeny.num_leaves - 1):
+        if phylogeny.tree.in_degree(i) == 0:
+            parent_sibling.append([-1, -1])
+            continue
+        parent = list(phylogeny.tree.predecessors(i))[0]
+        siblings = list(phylogeny.tree.successors(parent))
+        siblings.remove(i)
+        parent_sibling.append([parent, siblings[0]])
+    parent_sibling = jnp.array(parent_sibling)
 
     if mode == "score":
         def llh_helper():
@@ -97,15 +113,17 @@ def main(mode, phylo_opt):
                 leaves, 
                 internal_postorder, 
                 internal_postorder_children, 
+                parent_sibling,
+                level_order_jax,
                 phylo_opt.inside_log_likelihoods, 
                 phylo_opt.model_parameters,
                 phylogeny.character_matrix, 
                 phylogeny.root
             )
 
-        llh_helper = jax.jit(llh_helper)
+        #llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
-        NUM_ITER = 200
+        NUM_ITER = 2
         llh = llh_helper()
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
         avg_runtime = runtime / NUM_ITER
@@ -120,6 +138,8 @@ def main(mode, phylo_opt):
                 leaves, 
                 internal_postorder, 
                 internal_postorder_children, 
+                parent_sibling,
+                level_order_jax,
                 phylo_opt.inside_log_likelihoods, 
                 phylo_opt.model_parameters, 
                 phylogeny.character_matrix, 

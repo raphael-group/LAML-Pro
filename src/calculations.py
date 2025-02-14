@@ -5,6 +5,83 @@ import equinox.internal as eqxi
 DEPTH = 10
 EPS = 1e-6
 
+def compute_Q_v_product(
+    v : jnp.array,
+    log_mutation_priors : jnp.array,
+    alphabet_size : int,
+    node_idx : int,
+    t1_array : jnp.array,
+    t2_array : jnp.array,
+    t3_array : jnp.array,
+    alpha0_array : jnp.array
+) -> jnp.array:
+    """
+    Computes the vectors u_k = Q_kv_k where Q_k is the 
+    transition matrix for the k-th character on the edge
+    into node u.
+    """
+
+    t1 = t1_array[node_idx]
+    t2 = t2_array[node_idx]
+    t3 = t3_array[node_idx]
+    alpha0_val = alpha0_array[node_idx]
+    
+    # case alpha = 0
+    out = v.at[:, 0].set(alpha0_val + v[:, 0])
+
+    # case alpha = -1
+    log_a = t2 + jax.nn.logsumexp(v[:, :-1], axis=1) # shape (num_characters,)
+    log_b = v[:, -1] # shape (num_characters,)
+    out = out.at[:, -1].set(jnp.logaddexp(log_a, log_b)) 
+
+    # case alpha = 1, ..., A - 1
+    log_0 = log_mutation_priors + t1 + t3 + v[:, 0][:, None] # shape (num_characters, alphabet_size - 2)
+    log_alpha = t1 + v[:, 1:-1] # shape (num_characters, alphabet_size - 2)
+    out = out.at[:, 1:-1].set(jnp.logaddexp(log_0, log_alpha))
+
+    return out
+
+def compute_Q_transpose_v_product(
+    v : jnp.array,
+    log_mutation_priors : jnp.array,
+    alphabet_size : int,
+    node_idx : int,
+    t1_array : jnp.array,
+    t2_array : jnp.array,
+    t3_array : jnp.array,
+    alpha0_array : jnp.array
+) -> jnp.array:
+    """
+    Computes the vectors u_k = Q_k^Tv_k where Q_k is the 
+    transition matrix for the k-th character on the edge
+    into node u.
+    """
+
+    t1 = t1_array[node_idx]
+    t2 = t2_array[node_idx]
+    t3 = t3_array[node_idx]
+    alpha0_val = alpha0_array[node_idx]
+    
+    summands = jnp.zeros_like(v)
+    summands = summands.at[:, 0].set(alpha0_val)
+    if alphabet_size > 2:
+        summands = summands.at[:, 1:-1].set(t1 + log_mutation_priors + t3)
+    summands = summands.at[:, -1].set(t2)
+
+    val_for_alpha0 = jax.nn.logsumexp(summands + v, axis=1)
+
+    idx = jnp.arange(alphabet_size)[None, :]  # shape (1, alphabet_size)
+    out = jnp.where(
+        idx == 0,
+        val_for_alpha0[:, None],
+        jnp.where(
+            idx == (alphabet_size - 1),
+            v[:, -1, None],
+            jnp.logaddexp(t1 + v, t2 + v[:, -1, None])
+        )
+    )
+    return out
+    
 def compute_single_edge_outside_ll(
     outside_ll : jnp.array,
     edge_inside_ll : jnp.array,
@@ -18,27 +95,11 @@ def compute_single_edge_outside_ll(
     t3_array : jnp.array,
     alpha0_array : jnp.array
 ) -> jnp.array:
-    t1 = t1_array[node_idx]
-    t2 = t2_array[node_idx]
-    t3 = t3_array[node_idx]
-    alpha0_val = alpha0_array[node_idx]
-
-    res = outside_ll[:, parent_idx, :] + edge_inside_ll[:, sibling_idx, :] # shape (num_characters, alphabet_size)
-    
-    # case alpha = 0
-    out = res.at[:, 0].set(alpha0_val + res[:, 0])
-
-    # case alpha = -1
-    log_a = t2 + jax.nn.logsumexp(res[:, :-1], axis=1) # shape (num_characters,)
-    log_b = res[:, -1] # shape (num_characters,)
-    out = out.at[:, -1].set(jnp.logaddexp(log_a, log_b)) 
-
-    # case alpha = 1, ..., A - 1
-    log_0 = log_mutation_priors + t1 + t3 + res[:, 0][:, None] # shape (num_characters, alphabet_size - 2)
-    log_alpha = t1 + res[:, 1:-1] # shape (num_characters, alphabet_size - 2)
-    out = out.at[:, 1:-1].set(jnp.logaddexp(log_0, log_alpha))
-
-    return out
+    return compute_Q_v_product(
+        outside_ll[:, parent_idx, :] + edge_inside_ll[:, sibling_idx, :], 
+        log_mutation_priors, alphabet_size, node_idx, 
+        t1_array, t2_array, t3_array, alpha0_array
+    )
 
 def compute_single_edge_inside_ll(
     inside_ll : jnp.array,
@@ -54,33 +115,71 @@ def compute_single_edge_inside_ll(
     Computes the edge inside log-likelihood P^c((u, v) | a) for all
     characters c and states a provided the log-likelihood of v.
     """
-
-    t1 = t1_array[child_idx]
-    t2 = t2_array[child_idx]
-    t3 = t3_array[child_idx]
-    alpha0_val = alpha0_array[child_idx]
-
-    col = inside_ll[:, child_idx, :]  # => (num_characters, alphabet_size)
-
-    summands = jnp.zeros_like(col)
-    summands = summands.at[:, 0].set(alpha0_val)
-    if alphabet_size > 2:
-        summands = summands.at[:, 1:-1].set(t1 + log_mutation_priors + t3)
-    summands = summands.at[:, -1].set(t2)
-
-    val_for_alpha0 = jax.nn.logsumexp(summands + col, axis=1)
-
-    idx = jnp.arange(alphabet_size)[None, :]  # shape (1, alphabet_size)
-    out = jnp.where(
-        idx == 0,
-        val_for_alpha0[:, None],
-        jnp.where(
-            idx == (alphabet_size - 1),
-            inside_ll[:, child_idx, -1, None],
-            jnp.logaddexp(t1 + col, t2 + col[:, -1, None])
-        )
+    return compute_Q_transpose_v_product(
+        inside_ll[:, child_idx, :], 
+        log_mutation_priors, alphabet_size, child_idx, 
+        t1_array, t2_array, t3_array, alpha0_array
     )
-    return out
+
+def compute_outside_log_likelihoods(
+    edge_inside_log_likelihoods: jnp.array,
+    parent_sibling: jnp.array,
+    branch_lengths: jnp.array,
+    level_order: jnp.array,
+    model_parameters: jnp.array,
+    mutation_priors: jnp.array,
+    root: int,
+):
+    """Computes the outside log-likelihoods for internal nodes via a depth-based traversal strategy."""
+
+    depth = DEPTH
+    ν = model_parameters[0]
+    num_characters, num_nodes, alphabet_size = edge_inside_log_likelihoods.shape
+
+    log_mutation_priors = jnp.log(mutation_priors)
+
+    minus_blen_times_nu = -branch_lengths * ν
+    t1_array = minus_blen_times_nu
+    t2_array = jnp.log(jnp.where(-minus_blen_times_nu < EPS, EPS, 1.0 - jnp.exp(minus_blen_times_nu)))
+    t3_array = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
+    alpha0_array = -branch_lengths * (1.0 + ν) # for alpha=0 summand
+
+    def body_fun(u, outside_ll):
+        w, v = parent_sibling[u]
+
+        res = compute_single_edge_outside_ll(
+            outside_ll, edge_inside_log_likelihoods, log_mutation_priors, alphabet_size, 
+            u, w, v, t1_array, t2_array, t3_array, alpha0_array
+        )
+
+        return res
+
+    i_vector = jnp.arange(num_nodes)
+    update_f = lambda outside_ll: jax.vmap(lambda i: body_fun(i, outside_ll))
+
+    def scan_body(carry, d):
+        outside_ll = carry
+        cond = (level_order == d)[None, :, None]
+
+        all_updates = jnp.where(
+            cond,
+            update_f(outside_ll)(i_vector).transpose(1, 0, 2),
+            outside_ll
+        )
+
+        return all_updates, None
+
+    # initialize root outside log-likelihood
+    outside_log_likelihoods = jnp.zeros((num_characters, num_nodes, alphabet_size))
+    outside_log_likelihoods = outside_log_likelihoods.at[:, root, 0].set(alpha0_array[root])
+    outside_log_likelihoods = outside_log_likelihoods.at[:, root, -1].set(t2_array[root])
+    outside_log_likelihoods = outside_log_likelihoods.at[:, root, 1:-1].set(t1_array[root] + log_mutation_priors + t3_array[root])
+
+    outside_log_likelihoods, _ = jax.lax.scan(
+        scan_body, outside_log_likelihoods, jnp.arange(1, depth + 1), #kind="checkpointed", buffers=lambda B: B, checkpoints="all"
+    )
+
+    return outside_log_likelihoods
 
 def compute_internal_log_likelihoods(
     inside_log_likelihoods: jnp.array,
@@ -259,6 +358,8 @@ def compute_log_likelihood(
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
+    parent_sibling : jnp.array,
+    level_order : jnp.array,
     inside_log_likelihoods : jnp.array,
     model_parameters : jnp.array,
     character_matrix : jnp.array,
@@ -306,7 +407,18 @@ def compute_log_likelihood(
         model_parameters
     )
 
-    print(edge_inside_log_likelihoods.shape)
-    print(inside_log_likelihoods.shape)
+    outside_log_likelihoods = compute_outside_log_likelihoods(
+        edge_inside_log_likelihoods, 
+        parent_sibling, 
+        branch_lengths, 
+        level_order, 
+        model_parameters, 
+        mutation_priors, 
+        root
+    )
+    
+    likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
+    error = likelihoods - inside_root_llh[:, 0][:, None]
+    assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
 
     return inside_root_llh[:, 0].sum()
