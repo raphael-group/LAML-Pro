@@ -352,6 +352,60 @@ def compute_edge_inside_log_likelihoods(
 
     return edge_inside_log_likelihoods.transpose(1, 0, 2)
 
+def compute_log_responsibilities(
+    likelihood : jnp.array,
+    inside_log_likelihoods : jnp.array,
+    outside_log_likelihoods : jnp.array,
+    edge_inside_log_likelihoods : jnp.array,
+    parent_sibling : jnp.array,
+    branch_lengths : jnp.array,
+    mutation_priors : jnp.array,
+    model_parameters : jnp.array
+) -> jnp.array:
+    num_nodes = branch_lengths.shape[0]
+    alphabet_size  = inside_log_likelihoods.shape[2]
+    ν = model_parameters[0]
+    log_mutation_priors = jnp.log(mutation_priors)
+
+    minus_blen_times_nu = -branch_lengths * ν
+    t1_array = minus_blen_times_nu
+    t2_array = jnp.log(jnp.where(-minus_blen_times_nu < EPS, EPS, 1.0 - jnp.exp(minus_blen_times_nu)))
+    t3_array = jnp.log(jnp.where(branch_lengths < EPS, EPS, 1.0 - jnp.exp(-branch_lengths)))
+    alpha0_array = -branch_lengths * (1.0 + ν)
+
+    def body_fun(v):
+        u, w = parent_sibling[v]
+
+        log_responsibility = outside_log_likelihoods[:, u, :] + edge_inside_log_likelihoods[:, w, :]
+
+        # shape (num_characters,)
+        C_zero_zero   = log_responsibility[:, 0] + inside_log_likelihoods[:, v, 0] + alpha0_array[v] 
+
+        # shape (num_characters, alphabet_size - 2)
+        C_zero_alpha  = log_responsibility[:, 0][:, None] + inside_log_likelihoods[:, v, 1:-1] + t1_array[v] + log_mutation_priors + t3_array[v] 
+        
+        # shape (num_characters,)
+        C_zero_miss   = log_responsibility[:, 0] + inside_log_likelihoods[:, v, -1] + t2_array[v]
+
+        # shape (num_characters, alphabet_size - 2)
+        C_alpha_alpha = log_responsibility[:, 1:-1] + inside_log_likelihoods[:, v, 1:-1] + t1_array[v]
+        
+        # shape (num_characters, alphabet_size - 2)
+        C_alpha_miss  = log_responsibility[:, 1:-1] + inside_log_likelihoods[:, v, -1][:, None] + t2_array[v]
+
+        # shape (num_characters,)        
+        C_miss_miss   = log_responsibility[:, -1] + inside_log_likelihoods[:, v, -1]
+
+        # SANITY CHECK: SUM is constant across all characters at every (non-root) node
+        sum1 = jax.nn.logsumexp(jnp.concatenate([C_zero_alpha, C_alpha_alpha, C_alpha_miss], axis=1), axis=1)
+        sum2 = jax.nn.logsumexp(jnp.concatenate([C_zero_zero[:, None], C_zero_miss[:, None], C_miss_miss[:, None]], axis=1), axis=1)
+        sum  = jnp.logaddexp(sum1, sum2)
+
+        return sum
+    
+    log_responsibilities = jax.vmap(body_fun)(jnp.arange(num_nodes))
+    return log_responsibilities
+
 def compute_log_likelihood(
     branch_lengths : jnp.array,
     mutation_priors : jnp.array,
@@ -417,9 +471,22 @@ def compute_log_likelihood(
         root
     )
     
+    log_responsibilities = compute_log_responsibilities(
+        inside_root_llh, 
+        inside_log_likelihoods, 
+        outside_log_likelihoods, 
+        edge_inside_log_likelihoods, 
+        parent_sibling, 
+        branch_lengths, 
+        mutation_priors, 
+        model_parameters
+    )
+
+    print(log_responsibilities)
+    print(log_responsibilities.shape)
     # CONSISTENCY CHECK: inside log-likelihoods are consistent with the outside log-likelihoods
-    # likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
-    # error = likelihoods - inside_root_llh[:, 0][:, None]
-    # assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
+    likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
+    error = likelihoods - inside_root_llh[:, 0][:, None]
+    assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
 
     return inside_root_llh[:, 0].sum()
