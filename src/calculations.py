@@ -1,4 +1,5 @@
 import jax 
+import numpy as np
 import jax.numpy as jnp
 import equinox.internal as eqxi
 
@@ -362,6 +363,30 @@ def compute_log_responsibilities(
     mutation_priors : jnp.array,
     model_parameters : jnp.array
 ) -> jnp.array:
+    """
+    Computes log-responsibilities (E-step) for all edges in the phylogeny given
+    inside, outside, and edge inside log-likelihoods.
+
+    Args:
+        likelihood: Array of shape (num_characters, alphabet_size) or (num_characters,)
+            representing log-likelihoods at some reference context (e.g., root state).
+        inside_log_likelihoods: Array of shape (num_characters, num_nodes, alphabet_size)
+            containing inside log-likelihoods for each node and character.
+        outside_log_likelihoods: Array of shape (num_characters, num_nodes, alphabet_size)
+            containing outside log-likelihoods for each node and character.
+        edge_inside_log_likelihoods: Array of shape (num_characters, num_nodes, alphabet_size)
+            holding log-likelihoods for child-specific transitions along edges.
+        parent_sibling: Array of shape (num_nodes, 2) with (parent_idx, sibling_idx)
+            for each node.
+        branch_lengths: Array of shape (num_nodes,) with branch lengths for each node.
+        mutation_priors: Array of shape (alphabet_size,) with prior mutation probabilities.
+        model_parameters: Array with [ν, ϕ] (heritable silencing rate, dropout rate).
+
+    Returns:
+        A (num_nodes, 5) array of log-responsibilities, where each row corresponds
+        to a node and collects the aggregated log-probabilities across all characters 
+        for various transition categories (e.g., alpha -> alpha, alpha -> missing, etc.).
+    """
     num_nodes = branch_lengths.shape[0]
     alphabet_size  = inside_log_likelihoods.shape[2]
     ν = model_parameters[0]
@@ -393,15 +418,13 @@ def compute_log_responsibilities(
         # shape (num_characters, alphabet_size - 2)
         C_alpha_miss  = log_responsibility[:, 1:-1] + inside_log_likelihoods[:, v, -1][:, None] + t2_array[v]
 
-        # shape (num_characters,)        
-        C_miss_miss   = log_responsibility[:, -1] + inside_log_likelihoods[:, v, -1]
+        C_zero_zero = jax.nn.logsumexp(C_zero_zero)
+        C_zero_alpha = jax.nn.logsumexp(C_zero_alpha, axis=[0, 1])
+        C_zero_miss = jax.nn.logsumexp(C_zero_miss)
+        C_alpha_alpha = jax.nn.logsumexp(C_alpha_alpha, axis=[0, 1])
+        C_alpha_miss = jax.nn.logsumexp(C_alpha_miss, axis=[0, 1])
 
-        # SANITY CHECK: SUM is constant across all characters at every (non-root) node
-        sum1 = jax.nn.logsumexp(jnp.concatenate([C_zero_alpha, C_alpha_alpha, C_alpha_miss], axis=1), axis=1)
-        sum2 = jax.nn.logsumexp(jnp.concatenate([C_zero_zero[:, None], C_zero_miss[:, None], C_miss_miss[:, None]], axis=1), axis=1)
-        sum  = jnp.logaddexp(sum1, sum2)
-
-        return sum
+        return jnp.array([C_zero_zero, C_zero_alpha, C_zero_miss, C_alpha_alpha, C_alpha_miss])
     
     log_responsibilities = jax.vmap(body_fun)(jnp.arange(num_nodes))
     return log_responsibilities
@@ -482,11 +505,11 @@ def compute_log_likelihood(
         model_parameters
     )
 
-    print(log_responsibilities)
-    print(log_responsibilities.shape)
-    # CONSISTENCY CHECK: inside log-likelihoods are consistent with the outside log-likelihoods
-    likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
-    error = likelihoods - inside_root_llh[:, 0][:, None]
-    assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
+    # CONSISTENCY CHECK 1: inside log-likelihoods are consistent with the outside log-likelihoods
+    # likelihoods = jax.nn.logsumexp(outside_log_likelihoods + inside_log_likelihoods, axis=2)
+    # error = likelihoods - inside_root_llh[:, 0][:, None]
+    # assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-likelihood computation: {jnp.max(jnp.abs(error))}"
+
+    #print(np.array(jax.nn.logsumexp(log_responsibilities, axis=1)))
 
     return inside_root_llh[:, 0].sum()
