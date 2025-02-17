@@ -20,6 +20,7 @@ import equinox.internal as eqxi
 import calculations as calc
 from collections import defaultdict
 from typing import Callable
+from functools import partial
 
 """ 
 LAML: Lineage Analysis with Maximum Likelihood 
@@ -35,8 +36,12 @@ of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
 
-ABSOLUTE_TOLERANCE = 1e-2
-RELATIVE_TOLERANCE = 1e-2
+ABSOLUTE_TOLERANCE = 1e-1
+RELATIVE_TOLERANCE = 1e-1
+
+EM_ABSOLUTE_TOLERANCE = 1e-4
+EM_RELATIVE_TOLERANCE = 1e-4
+EM_STOPPING_CRITERION = 1e-4
 
 def optimize_parameters_direct(
     i,
@@ -52,6 +57,9 @@ def optimize_parameters_direct(
     mutation_priors : jnp.array,
     root : int
 ):
+    """
+    Assuming that missing states are represented by -1 in the character matrix.
+    """
     model_parameters = jnp.maximum(model_parameters, calc.EPS / (i + 1))
     model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS / (i + 1))
 
@@ -83,6 +91,20 @@ def optimize_parameters_direct(
     nllh = -loss_fn(res.value, None)
     return nllh, branch_lengths, model_parameters
 
+@jax.jit
+def M_step_loss_fn(parameters, args):
+    log_branch_lengths, logit_model_parameters = parameters
+    edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing = args
+    branch_lengths = jnp.exp(log_branch_lengths)
+    ν, ϕ           = jax.nn.sigmoid(logit_model_parameters)
+    c1 = -edge_responsibilities[:, 0] * branch_lengths *  (1.0 + ν)
+    c2 =  edge_responsibilities[:, 1] * (jnp.log(1 - jnp.exp(-branch_lengths)) - branch_lengths * ν)
+    c3 =  edge_responsibilities[:, 2] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
+    c4 = -edge_responsibilities[:, 3] * branch_lengths * ν
+    c5 =  edge_responsibilities[:, 4] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
+    c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - leaf_responsibilities) * jnp.log(ϕ)
+    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + jnp.sum(c6))
+    
 def optimize_parameters_expectation_maximization(
     i,
     leaves : jnp.array,
@@ -108,36 +130,46 @@ def optimize_parameters_expectation_maximization(
     num_not_missing = jnp.sum(character_matrix != -1, axis=1) # shape (num_leaves,)
 
     # uses equation (12) in LAML manuscript to setup the loss function
-    def loss_fn(parameters, args):
-        edge_responsibilities, leaf_responsibilities = args
-        log_branch_lengths, logit_model_parameters = parameters
-        branch_lengths = jnp.exp(log_branch_lengths)
-        ν, ϕ           = jax.nn.sigmoid(logit_model_parameters)
-        c1 = -edge_responsibilities[:, 0] * branch_lengths *  (1.0 + ν)
-        c2 =  edge_responsibilities[:, 1] * (jnp.log(1 - jnp.exp(-branch_lengths)) - branch_lengths * ν)
-        c3 =  edge_responsibilities[:, 2] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
-        c4 = -edge_responsibilities[:, 3] * branch_lengths * ν
-        c5 =  edge_responsibilities[:, 4] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
-        c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - leaf_responsibilities) * jnp.log(ϕ)
-        return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + jnp.sum(c6))
-    
     params = (log_branch_lengths, logit_model_parameters)
-    solver = optx.BFGS(atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE)
+    solver = optx.BFGS(atol=EM_ABSOLUTE_TOLERANCE, rtol=EM_RELATIVE_TOLERANCE)
 
-    for i in range(20):
-        llh, edge_responsibilities, leaf_responsibilities = calc.compute_E_step(
+    compute_llh = lambda params: calc.compute_log_likelihood(
+        jnp.exp(params[0]), mutation_priors, leaves, 
+        internal_postorder, internal_postorder_children,
+        parent_sibling, level_order, inside_log_likelihoods,
+        jax.nn.sigmoid(params[1]), character_matrix, root
+    )
+    
+    previous_nllh = compute_llh(params)
+
+    current_nllh = jnp.inf
+    iteration = 0
+    while True:
+        iteration += 1
+
+        _, edge_responsibilities, leaf_responsibilities = calc.compute_E_step(
             jnp.exp(params[0]), mutation_priors, leaves, 
             internal_postorder, internal_postorder_children, 
             parent_sibling, level_order, inside_log_likelihoods, 
             jax.nn.sigmoid(params[1]), character_matrix, root
         )
 
-        lg.logger.info(f"EM iteration {i}, NLLH: {llh}")
+        res = optx.minimise(
+            M_step_loss_fn, solver, params, max_steps=250, 
+            args=(edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing)
+        )
 
-        res = optx.minimise(loss_fn, solver, params, max_steps=2500, args=(edge_responsibilities, leaf_responsibilities))
         params = res.value
+        current_nllh = compute_llh(params)
 
-    return params
+        lg.logger.info(f"EM iteration {iteration}, Previous NLLH: {previous_nllh}, Current NLLH: {current_nllh}")
+        lg.logger.info(f"Relative Improvement: {jnp.abs(current_nllh - previous_nllh) / jnp.abs(previous_nllh)}")
+        if jnp.abs(current_nllh - previous_nllh) / jnp.abs(previous_nllh) < EM_STOPPING_CRITERION:
+            break
+
+        previous_nllh = current_nllh
+
+    return current_nllh, jnp.exp(params[0]), jax.nn.sigmoid(params[1])
     
 def main(mode, phylo_opt):
     phylogeny = phylo_opt.phylogeny
@@ -162,7 +194,7 @@ def main(mode, phylo_opt):
 
     if mode == "score":
         def llh_helper():
-            return calc.compute_E_step(
+            return calc.compute_log_likelihood(
                 phylo_opt.branch_lengths,
                 phylogeny.mutation_priors, 
                 leaves, 
@@ -174,10 +206,10 @@ def main(mode, phylo_opt):
                 phylo_opt.model_parameters,
                 phylogeny.character_matrix, 
                 phylogeny.root
-            )[0]
+            )
 
-        #llh_helper = jax.jit(llh_helper)
-        #llh_helper().block_until_ready()
+        llh_helper = jax.jit(llh_helper)
+        llh_helper().block_until_ready()
         NUM_ITER = 200
         llh = llh_helper()
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
@@ -203,11 +235,11 @@ def main(mode, phylo_opt):
                 phylogeny.root
             )
 
-        #start = time.time()
-        #optimize_helper = jax.jit(optimize_helper)
-        #optimize_helper(0)[0].block_until_ready()
-        #end = time.time()
-        compile_time = 0
+        # start = time.time()
+        # optimize_helper = jax.jit(optimize_helper)
+        # optimize_helper(0)[0].block_until_ready()
+        # end = time.time()
+        compile_time = 0#end - start
 
         start = time.time()
         nllh, branch_lengths, model_parameters = optimize_helper(0)
@@ -283,7 +315,7 @@ if __name__ == "__main__":
             lg.logger.error("Some branch lengths are missing. Initializing all branch lengths to 1.0.")
         branch_lengths = jnp.ones(2 * n - 1)
         # random initialization
-        # branch_lengths = jnp.array([random.uniform(0.1, 3.0) for i in range(2 * n - 1)])
+        branch_lengths = jnp.array([random.uniform(0.1, 3.0) for i in range(2 * n - 1)])
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
