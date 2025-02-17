@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import equinox.internal as eqxi
 
 DEPTH = 10
-EPS = 0.000001
+EPS = 0.0001
 
 def compute_Q_v_product(
     v : jnp.array,
@@ -486,7 +486,7 @@ def compute_log_likelihood(
 
     return inside_root_llh[:, 0].sum()
 
-# @jax.jit
+@jax.jit
 def compute_E_step(
     branch_lengths : jnp.array,
     mutation_priors : jnp.array,
@@ -552,8 +552,9 @@ def compute_E_step(
 
     # CONSISTENCY CHECK 2: log-responsibilities sum to 0 for each edge and character 
     # at every node except the root
-    non_root = jnp.arange(log_responsibilities.shape[0]) != root
-    error = jax.nn.logsumexp(log_responsibilities[non_root], axis=1)
-    assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-responsibility computation: {jnp.max(jnp.abs(error))}"
+    # non_root = jnp.arange(log_responsibilities.shape[0]) != root
+    # error = jax.nn.logsumexp(log_responsibilities[non_root], axis=1)
+    # assert jnp.allclose(error, 0.0, atol=1e-3), f"Error in log-responsibility computation: {jnp.max(jnp.abs(error))}"
 
-    return inside_root_llh[:, 0].sum(), jnp.exp(log_responsibilities).sum(axis=2)
+    leaf_responsibilities = inside_log_likelihoods[:, leaves, -1] + outside_log_likelihoods[:, leaves, -1] - inside_root_llh[:, 0][:, None]
+    return inside_root_llh[:, 0].sum(), jnp.exp(log_responsibilities).sum(axis=2), jnp.exp(leaf_responsibilities).sum(axis=0)
