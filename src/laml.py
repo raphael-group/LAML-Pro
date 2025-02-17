@@ -39,12 +39,14 @@ are non-missing states, and -1 is the unknown (?) state.
 ABSOLUTE_TOLERANCE = 1e-1
 RELATIVE_TOLERANCE = 1e-1
 
-EM_ABSOLUTE_TOLERANCE = 1e-4
-EM_RELATIVE_TOLERANCE = 1e-4
+EM_ABSOLUTE_TOLERANCE = 1e-3
+EM_RELATIVE_TOLERANCE = 1e-3
 EM_STOPPING_CRITERION = 1e-4
 
+jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
+
 def optimize_parameters_direct(
-    i,
+    i : int,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -106,7 +108,7 @@ def M_step_loss_fn(parameters, args):
     return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + jnp.sum(c6))
     
 def optimize_parameters_expectation_maximization(
-    i,
+    i : int,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -117,7 +119,8 @@ def optimize_parameters_expectation_maximization(
     character_matrix : jnp.array,
     branch_lengths : jnp.array,
     mutation_priors : jnp.array,
-    root : int
+    root : int,
+    verbose = False
 ):
     model_parameters = jnp.maximum(model_parameters, calc.EPS / (i + 1))
     model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS / (i + 1))
@@ -133,7 +136,7 @@ def optimize_parameters_expectation_maximization(
     params = (log_branch_lengths, logit_model_parameters)
     solver = optx.BFGS(atol=EM_ABSOLUTE_TOLERANCE, rtol=EM_RELATIVE_TOLERANCE)
 
-    compute_llh = lambda params: calc.compute_log_likelihood(
+    compute_llh = lambda params: jit_compute_log_likelihood(
         jnp.exp(params[0]), mutation_priors, leaves, 
         internal_postorder, internal_postorder_children,
         parent_sibling, level_order, inside_log_likelihoods,
@@ -155,15 +158,17 @@ def optimize_parameters_expectation_maximization(
         )
 
         res = optx.minimise(
-            M_step_loss_fn, solver, params, max_steps=250, 
+            M_step_loss_fn, solver, params, max_steps=500, 
             args=(edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing)
         )
 
         params = res.value
         current_nllh = compute_llh(params)
 
-        lg.logger.info(f"EM iteration {iteration}, Previous NLLH: {previous_nllh}, Current NLLH: {current_nllh}")
-        lg.logger.info(f"Relative Improvement: {jnp.abs(current_nllh - previous_nllh) / jnp.abs(previous_nllh)}")
+        if verbose:
+            lg.logger.info(f"EM iteration {iteration}, Previous NLLH: {previous_nllh}, Current NLLH: {current_nllh}")
+            lg.logger.info(f"Relative Improvement: {jnp.abs(current_nllh - previous_nllh) / jnp.abs(previous_nllh)}")
+
         if jnp.abs(current_nllh - previous_nllh) / jnp.abs(previous_nllh) < EM_STOPPING_CRITERION:
             break
 
@@ -218,31 +223,54 @@ def main(mode, phylo_opt):
         root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
         lg.logger.info(f"Log likelihood at root {root}: {llh}")
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
-    elif mode == "optimize":
-        def optimize_helper(i):
-            return optimize_parameters_expectation_maximization(
-                i,
-                leaves, 
-                internal_postorder, 
-                internal_postorder_children, 
-                parent_sibling,
-                level_order_jax,
-                phylo_opt.inside_log_likelihoods, 
-                phylo_opt.model_parameters, 
-                phylogeny.character_matrix, 
-                phylo_opt.branch_lengths, 
-                phylogeny.mutation_priors, 
-                phylogeny.root
-            )
+    elif "optimize" in mode:
+        if mode == "optimize-direct":
+            def optimize_helper(i):
+                return optimize_parameters_direct(
+                    i,
+                    leaves, 
+                    internal_postorder, 
+                    internal_postorder_children, 
+                    parent_sibling,
+                    level_order_jax,
+                    phylo_opt.inside_log_likelihoods, 
+                    phylo_opt.model_parameters, 
+                    phylogeny.character_matrix, 
+                    phylo_opt.branch_lengths, 
+                    phylogeny.mutation_priors, 
+                    phylogeny.root
+                )
 
-        # start = time.time()
-        # optimize_helper = jax.jit(optimize_helper)
-        # optimize_helper(0)[0].block_until_ready()
-        # end = time.time()
-        compile_time = 0#end - start
+            start = time.time()
+            optimize_helper = jax.jit(optimize_helper)
+            optimize_helper(0)[0].block_until_ready()
+            end = time.time()
+            compile_time = end - start
+        else:
+            def optimize_helper(i):
+                return optimize_parameters_expectation_maximization(
+                    i,
+                    leaves, 
+                    internal_postorder, 
+                    internal_postorder_children, 
+                    parent_sibling,
+                    level_order_jax,
+                    phylo_opt.inside_log_likelihoods, 
+                    phylo_opt.model_parameters, 
+                    phylogeny.character_matrix, 
+                    phylo_opt.branch_lengths, 
+                    phylogeny.mutation_priors, 
+                    phylogeny.root,
+                    verbose=(i == 1)
+                )
 
+            start = time.time()
+            optimize_helper(0)[0] # warm start jit compiled functions
+            end = time.time()
+            compile_time = end - start
+        
         start = time.time()
-        nllh, branch_lengths, model_parameters = optimize_helper(0)
+        nllh, branch_lengths, model_parameters = optimize_helper(1)
         nllh.block_until_ready()
         end = time.time()
 
@@ -270,11 +298,18 @@ def parse_args():
     p.add_argument("-o", "--output", help="Prefix for output files.", default="output")
     p.add_argument("--nu", help="Heritable silencing rate (ν).", type=float, default=0.0)
     p.add_argument("--phi", help="Sequencing dropout rate (ϕ).", type=float, default=0.0)
-    p.add_argument("--mode", help="Algorithm mode.", default="score", choices=["score", "optimize", "time_llh"])
+    p.add_argument("--mode", help="Algorithm mode.", default="score", choices=["score", "optimize-em", "optimize-direct"])
     return p.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
+
+    lg.logger.remove()
+    lg.logger.add(
+        sys.stdout,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | {message}",
+        colorize=True
+    )
 
     tree, n = phylogeny.parse_newick(args.tree)
 
@@ -309,13 +344,15 @@ if __name__ == "__main__":
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
 
     if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)) or args.mode == "optimize":
-        if args.mode == "optimize":
+        if args.mode == "optimize-em" or args.mode == "optimize-direct":
             lg.logger.info("Optimization mode. Initializing all branch lengths to 1.0.")
         else:
             lg.logger.error("Some branch lengths are missing. Initializing all branch lengths to 1.0.")
-        branch_lengths = jnp.ones(2 * n - 1)
-        # random initialization
-        branch_lengths = jnp.array([random.uniform(0.1, 3.0) for i in range(2 * n - 1)])
+
+        if args.mode == "optimize-direct":
+            branch_lengths = jnp.ones(2 * n - 1)
+        else:
+            branch_lengths = jnp.array([random.uniform(0.1, 3.0) for i in range(2 * n - 1)])
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
