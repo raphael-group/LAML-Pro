@@ -14,16 +14,16 @@ process fast_laml {
     time '10m'
     clusterOptions '--account=raphael --gres=gpu:1'
 
-    publishDir "${params.outdir}/fast-laml/${id}", mode: 'copy'
+    publishDir "${params.outdir}/fast-laml-${mode}/${id}", mode: 'copy'
 
     input:
-      tuple val(id), path(character_matrix), path(tree)
+      tuple val(id), path(character_matrix), path(tree), val(mode)
 
     output:
       tuple path("log.txt"), path("fast_laml_results.json")
 
     """
-    python ${params.fast_laml} -t ${tree} -c ${character_matrix} --nu 0.5 --phi 0.5 --mode optimize -o fast_laml 2> log.txt
+    python ${params.fast_laml} -t ${tree} -c ${character_matrix} --nu 0.5 --phi 0.5 --mode optimize-${mode} -o fast_laml 2> log.txt
     """
 }
 
@@ -53,15 +53,16 @@ workflow {
                                .combine(channel.fromList(params.alphabet_size))
                                .combine(channel.fromList(params.seq_seed))
                                .combine(channel.fromList(params.prior_seed))
+                               .combine(channel.fromList(["em", "direct"]))
 
-    simulations = parameter_channel | map { ncells, nchars, alphabet, seq_seed, prior_seed ->
+    simulations = parameter_channel | map { ncells, nchars, alphabet, seq_seed, prior_seed, mode ->
         id               = "k${nchars}M${alphabet}p${prior_seed}_medium_sub${ncells}_r${seq_seed}"
         prefix           = "${params.simulation_dir}/${id}"
         character_matrix = "${prefix}/character_matrix.csv"
         tree             = "${prefix}/tree.nwk"
-        [id, character_matrix, tree]
+        [id, character_matrix, tree, mode]
     }
 
     simulations | fast_laml
-    simulations | laml
+    simulations | map {it -> [it[0], it[1], it[2]]} | laml
 }
