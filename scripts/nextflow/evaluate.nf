@@ -13,6 +13,7 @@ process fast_laml {
     memory '4 GB'
     time '10m'
     clusterOptions '--account=raphael --gres=gpu:1'
+    // clusterOptions '--gres=gpu:1'
 
     publishDir "${params.outdir}/fast-laml-${mode}/${id}", mode: 'copy'
 
@@ -32,6 +33,7 @@ process laml {
     memory '4 GB'
     time '10m'
     clusterOptions '--account=raphael --gres=gpu:1'
+    // clusterOptions '--gres=gpu:1'
 
     publishDir "${params.outdir}/laml/${id}", mode: 'copy'
 
@@ -53,7 +55,7 @@ workflow {
                                .combine(channel.fromList(params.alphabet_size))
                                .combine(channel.fromList(params.seq_seed))
                                .combine(channel.fromList(params.prior_seed))
-                               .combine(channel.fromList(["em", "direct"]))
+                               .combine(channel.fromList(["em"]))
 
     simulations = parameter_channel | map { ncells, nchars, alphabet, seq_seed, prior_seed, mode ->
         id               = "k${nchars}M${alphabet}p${prior_seed}_medium_sub${ncells}_r${seq_seed}"
@@ -64,5 +66,5 @@ workflow {
     }
 
     simulations | fast_laml
-    simulations | map {it -> [it[0], it[1], it[2]]} | laml
+    //simulations | map {it -> [it[0], it[1], it[2]]} | unique | laml
 }
