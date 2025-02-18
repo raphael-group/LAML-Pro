@@ -3,7 +3,6 @@ import numpy as np
 import jax.numpy as jnp
 import equinox.internal as eqxi
 
-DEPTH = 10
 EPS = 1e-6
 
 def compute_Q_v_product(
@@ -133,7 +132,7 @@ def compute_outside_log_likelihoods(
 ):
     """Computes the outside log-likelihoods for internal nodes via a depth-based traversal strategy."""
 
-    depth = DEPTH
+    depth = jnp.max(level_order)
     ν = model_parameters[0]
     num_characters, num_nodes, alphabet_size = edge_inside_log_likelihoods.shape
 
@@ -158,26 +157,23 @@ def compute_outside_log_likelihoods(
     i_vector = jnp.arange(num_nodes)
     update_f = lambda outside_ll: jax.vmap(lambda i: body_fun(i, outside_ll))
 
-    def scan_body(carry, d):
-        outside_ll = carry
-        cond = (level_order == d)[None, :, None]
-
-        all_updates = jnp.where(
-            cond,
-            update_f(outside_ll)(i_vector).transpose(1, 0, 2),
-            outside_ll
-        )
-
-        return all_updates, None
-
-    # initialize root outside log-likelihood
     outside_log_likelihoods = jnp.zeros((num_characters, num_nodes, alphabet_size))
     outside_log_likelihoods = outside_log_likelihoods.at[:, root, 0].set(alpha0_array[root])
     outside_log_likelihoods = outside_log_likelihoods.at[:, root, -1].set(t2_array[root])
     outside_log_likelihoods = outside_log_likelihoods.at[:, root, 1:-1].set(t1_array[root] + log_mutation_priors + t3_array[root])
 
-    outside_log_likelihoods, _ = jax.lax.scan(
-        scan_body, outside_log_likelihoods, jnp.arange(1, depth + 1), #kind="checkpointed", buffers=lambda B: B, checkpoints="all"
+    def body_fun_d(d, carry):
+        outside_ll = carry
+        cond = (level_order == d)[None, :, None]
+        all_updates = jnp.where(
+            cond,
+            update_f(outside_ll)(i_vector).transpose(1, 0, 2),
+            outside_ll
+        )
+        return all_updates
+
+    outside_log_likelihoods = jax.lax.fori_loop(
+        1, depth + 1, body_fun_d, outside_log_likelihoods
     )
 
     return outside_log_likelihoods
@@ -217,7 +213,7 @@ def compute_internal_log_likelihoods(
         performs each of the O(depth) steps completely in parallel.
     """
 
-    depth = DEPTH
+    depth = jnp.max(internal_postorder[:, 1])
     ν = model_parameters[0]
     num_characters, num_nodes, alphabet_size = inside_log_likelihoods.shape
 
@@ -243,26 +239,25 @@ def compute_internal_log_likelihoods(
     i_vector = jnp.arange(internal_postorder.shape[0])
     update_f = lambda inside_ll: jax.vmap(lambda i: body_fun(i, inside_ll))
 
-    def scan_body(carry, d):
+    def body_fun_d(d, carry):
         inside_ll = carry
         cond = (internal_postorder[:, 1] == depth - d)[:, None, None]
-
         all_updates = jnp.where(
             cond,
             update_f(inside_ll)(i_vector),
             inside_ll[:, internal_postorder[:, 0], :].transpose(1, 0, 2)
         )
+        return inside_ll.at[:, internal_postorder[:, 0], :].set(all_updates.transpose(1, 0, 2))
 
-        return inside_ll.at[:, internal_postorder[:,0], :].set(all_updates.transpose(1, 0, 2)), None
-
-    # Using Equinox's internal scan to accumulate the result
-    # due to an XLA bug with JAX's scan: 
-    #      https://github.com/jax-ml/jax/issues/10197
-    inside_log_likelihoods, _ = eqxi.scan(
-        scan_body, inside_log_likelihoods, jnp.arange(depth + 1), kind="checkpointed", buffers=lambda B: B, checkpoints="all"
+    inside_log_likelihoods = jax.lax.fori_loop(
+        0, depth + 1, body_fun_d, inside_log_likelihoods
     )
+
     inside_root_llh = compute_single_edge_inside_ll(
-        inside_log_likelihoods, root, log_mutation_priors, alphabet_size, t1_array, t2_array, t3_array, alpha0_array
+        inside_log_likelihoods, root,
+        log_mutation_priors, alphabet_size,
+        t1_array, t2_array, t3_array,
+        alpha0_array
     )
     return inside_log_likelihoods, inside_root_llh
 

@@ -310,7 +310,7 @@ def parse_args():
     p.add_argument("-o", "--output", help="Prefix for output files.", default="output")
     p.add_argument("--nu", help="Heritable silencing rate (ν).", type=float, default=0.0)
     p.add_argument("--phi", help="Sequencing dropout rate (ϕ).", type=float, default=0.0)
-    p.add_argument("--mode", help="Algorithm mode.", default="score", choices=["score", "optimize-em", "optimize-direct"])
+    p.add_argument("--mode", help="Algorithm mode.", default="score", choices=["score", "optimize-em"])
     return p.parse_args()
 
 if __name__ == "__main__":
@@ -373,12 +373,7 @@ if __name__ == "__main__":
     lg.logger.info(f"Using device {jax.devices()[-1]} for computation.")
     jax.config.update("jax_default_device", jax.devices()[-1])
 
-    depths = nx.single_source_shortest_path_length(tree, phylo.root)
-    max_depth = max(depths.values())
-    calc.DEPTH = max_depth
-
     lg.logger.info(f"Tree has {n} taxa and {2 * n - 1} nodes.")
-    lg.logger.info(f"Tree depth: {max_depth}")
     lg.logger.info(f"Character matrix has {character_matrix.shape[1]} characters and an alphabet size of {phylo.max_alphabet_size}.")
     model_parameters = jnp.array([args.nu, args.phi])
     phylo_opt = phylogeny.PhylogenyOptimization(
