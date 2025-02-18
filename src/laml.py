@@ -39,14 +39,13 @@ are non-missing states, and -1 is the unknown (?) state.
 ABSOLUTE_TOLERANCE = 1e-1
 RELATIVE_TOLERANCE = 1e-1
 
-EM_ABSOLUTE_TOLERANCE = 1e-3
-EM_RELATIVE_TOLERANCE = 1e-3
-EM_STOPPING_CRITERION = 1e-4
+EM_ABSOLUTE_TOLERANCE = 5e-5
+EM_RELATIVE_TOLERANCE = 5e-5
+EM_STOPPING_CRITERION = 1e-5
 
 jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
 
 def optimize_parameters_direct(
-    i : int,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -62,8 +61,8 @@ def optimize_parameters_direct(
     """
     Assuming that missing states are represented by -1 in the character matrix.
     """
-    model_parameters = jnp.maximum(model_parameters, calc.EPS / (i + 1))
-    model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS / (i + 1))
+    model_parameters = jnp.maximum(model_parameters, calc.EPS)
+    model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS)
 
     logit_model_parameters = jnp.log(model_parameters / (1.0 - model_parameters))
     log_branch_lengths = jnp.log(jnp.maximum(branch_lengths, calc.EPS))
@@ -104,11 +103,10 @@ def M_step_loss_fn(parameters, args):
     c3 =  edge_responsibilities[:, 2] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
     c4 = -edge_responsibilities[:, 3] * branch_lengths * ν
     c5 =  edge_responsibilities[:, 4] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
-    c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - leaf_responsibilities) * jnp.log(ϕ)
-    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + jnp.sum(c6))
+    c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - jnp.sum(leaf_responsibilities)) * jnp.log(ϕ)
+    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + c6)
     
 def optimize_parameters_expectation_maximization(
-    i : int,
     leaves : jnp.array,
     internal_postorder : jnp.array,
     internal_postorder_children : jnp.array,
@@ -122,15 +120,15 @@ def optimize_parameters_expectation_maximization(
     root : int,
     verbose = False
 ):
-    model_parameters = jnp.maximum(model_parameters, calc.EPS / (i + 1))
-    model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS / (i + 1))
+    model_parameters = jnp.maximum(model_parameters, calc.EPS)
+    model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS)
 
     logit_model_parameters = jnp.log(model_parameters / (1.0 - model_parameters))
     log_branch_lengths = jnp.log(jnp.maximum(branch_lengths, calc.EPS))
 
     # Assuming that missing states are represented by -1 in the character matrix
-    num_missing = jnp.sum(character_matrix == -1, axis=1) # shape (num_leaves,)
-    num_not_missing = jnp.sum(character_matrix != -1, axis=1) # shape (num_leaves,)
+    num_missing = jnp.sum(character_matrix == -1, axis=[0,1]) # shape (num_leaves,)
+    num_not_missing = jnp.sum(character_matrix != -1, axis=[0,1]) # shape (num_leaves,)
 
     # uses equation (12) in LAML manuscript to setup the loss function
     params = (log_branch_lengths, logit_model_parameters)
@@ -158,7 +156,7 @@ def optimize_parameters_expectation_maximization(
         )
 
         res = optx.minimise(
-            M_step_loss_fn, solver, params, max_steps=500, 
+            M_step_loss_fn, solver, params, max_steps=2500, 
             args=(edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing)
         )
 
@@ -174,7 +172,7 @@ def optimize_parameters_expectation_maximization(
 
         previous_nllh = current_nllh
 
-    return current_nllh, jnp.exp(params[0]), jax.nn.sigmoid(params[1])
+    return current_nllh, jnp.exp(params[0]), jax.nn.sigmoid(params[1]), iteration
     
 def main(mode, phylo_opt):
     phylogeny = phylo_opt.phylogeny
@@ -223,62 +221,74 @@ def main(mode, phylo_opt):
         root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
         lg.logger.info(f"Log likelihood at root {root}: {llh}")
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
-    elif "optimize" in mode:
-        if mode == "optimize-direct":
-            def optimize_helper(i):
-                return optimize_parameters_direct(
-                    i,
-                    leaves, 
-                    internal_postorder, 
-                    internal_postorder_children, 
-                    parent_sibling,
-                    level_order_jax,
-                    phylo_opt.inside_log_likelihoods, 
-                    phylo_opt.model_parameters, 
-                    phylogeny.character_matrix, 
-                    phylo_opt.branch_lengths, 
-                    phylogeny.mutation_priors, 
-                    phylogeny.root
-                )
+    elif mode == "optimize-direct":
+        def optimize_helper():
+            return optimize_parameters_direct(
+                leaves, 
+                internal_postorder, 
+                internal_postorder_children, 
+                parent_sibling,
+                level_order_jax,
+                phylo_opt.inside_log_likelihoods, 
+                phylo_opt.model_parameters, 
+                phylogeny.character_matrix, 
+                phylo_opt.branch_lengths, 
+                phylogeny.mutation_priors, 
+                phylogeny.root
+            )
 
-            start = time.time()
-            optimize_helper = jax.jit(optimize_helper)
-            optimize_helper(0)[0].block_until_ready()
-            end = time.time()
-            compile_time = end - start
-        else:
-            def optimize_helper(i):
-                return optimize_parameters_expectation_maximization(
-                    i,
-                    leaves, 
-                    internal_postorder, 
-                    internal_postorder_children, 
-                    parent_sibling,
-                    level_order_jax,
-                    phylo_opt.inside_log_likelihoods, 
-                    phylo_opt.model_parameters, 
-                    phylogeny.character_matrix, 
-                    phylo_opt.branch_lengths, 
-                    phylogeny.mutation_priors, 
-                    phylogeny.root,
-                    verbose=(i == 1)
-                )
-
-            start = time.time()
-            optimize_helper(0)[0] # warm start jit compiled functions
-            end = time.time()
-            compile_time = end - start
-        
         start = time.time()
-        nllh, branch_lengths, model_parameters = optimize_helper(1)
+        optimize_helper = jax.jit(optimize_helper)
+        optimize_helper()[0].block_until_ready()
+        end = time.time()
+        compile_time = end - start
+                
+        start = time.time()
+        nllh, branch_lengths, model_parameters = optimize_helper()
         nllh.block_until_ready()
         end = time.time()
 
+        optimizer_specific_results = {}
+
         lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
         lg.logger.info(f"Optimized negative log likelihood(s): {nllh}")
-        lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
+        # lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
+        lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
+    elif mode == "optimize-em":
+        def optimize_helper(verbose):
+            return optimize_parameters_expectation_maximization(
+                leaves, 
+                internal_postorder, 
+                internal_postorder_children, 
+                parent_sibling,
+                level_order_jax,
+                phylo_opt.inside_log_likelihoods, 
+                phylo_opt.model_parameters, 
+                phylogeny.character_matrix, 
+                phylo_opt.branch_lengths, 
+                phylogeny.mutation_priors, 
+                phylogeny.root,
+                verbose=verbose
+            )
+
+        start = time.time()
+        optimize_helper(False)[0] # warm start jit compiled functions
+        end = time.time()
+        compile_time = end - start
+
+        start = time.time()
+        nllh, branch_lengths, model_parameters, em_iterations = optimize_helper(True)
+        nllh.block_until_ready()
+        end = time.time()
+
+        optimizer_specific_results = {"em_iterations": em_iterations}
+
+        lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
+        lg.logger.info(f"Optimized negative log likelihood(s): {nllh}")
+        # lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
         lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
 
+    if "optimize" in mode:
         with open(f"{args.output}_results.json", "w") as f:
             res = {
                 "nllh": -nllh.item(),
@@ -287,6 +297,8 @@ def main(mode, phylo_opt):
                 "runtime": end - start,
                 "compile_time": compile_time
             }
+
+            res = res | optimizer_specific_results
 
             f.write(json.dumps(res))
 
@@ -343,7 +355,7 @@ if __name__ == "__main__":
 
     phylo = phylogeny.build_phylogeny(tree, n, character_matrix, priors)
 
-    if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)) or args.mode == "optimize":
+    if any(tree.nodes[i]["branch_length"] is None for i in range(2 * n - 1)) or "optimize" in args.mode:
         if args.mode == "optimize-em" or args.mode == "optimize-direct":
             lg.logger.info("Optimization mode. Initializing all branch lengths to 1.0.")
         else:
@@ -352,7 +364,8 @@ if __name__ == "__main__":
         if args.mode == "optimize-direct":
             branch_lengths = jnp.ones(2 * n - 1)
         else:
-            branch_lengths = jnp.array([random.uniform(0.1, 3.0) for i in range(2 * n - 1)])
+            branch_lengths = jnp.array([random.uniform(0.01, 5.0) for i in range(2 * n - 1)]) # TODO: give names to constants
+            branch_lengths = jnp.ones(2 * n - 1)
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 

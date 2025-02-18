@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import equinox.internal as eqxi
 
 DEPTH = 10
-EPS = 0.0001
+EPS = 1e-6
 
 def compute_Q_v_product(
     v : jnp.array,
