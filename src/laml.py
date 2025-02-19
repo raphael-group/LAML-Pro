@@ -44,7 +44,7 @@ EM_STOPPING_CRITERION = 1e-5
 
 def M_step_loss_fn(parameters, args):
     log_branch_lengths, logit_model_parameters = parameters
-    edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing, branch_mask = args
+    edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing = args[:4]
     branch_lengths = jnp.exp(log_branch_lengths)
     ν, ϕ           = jax.nn.sigmoid(logit_model_parameters)
     c1 = -edge_responsibilities[:, 0] * branch_lengths *  (1.0 + ν)
@@ -53,7 +53,7 @@ def M_step_loss_fn(parameters, args):
     c4 = -edge_responsibilities[:, 3] * branch_lengths * ν
     c5 =  edge_responsibilities[:, 4] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
     c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - jnp.sum(leaf_responsibilities)) * jnp.log(ϕ)
-    return -(jnp.sum((c1 + c2 + c3 + c4 + c5) * branch_mask) + c6)
+    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + c6)
 
 jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
 M_step_loss_fn_grad = jax.value_and_grad(M_step_loss_fn)
@@ -63,7 +63,11 @@ opt = optax.chain(optax.lbfgs(scale_init_precond=True), linesearch)
 
 @jax.jit
 def M_step_descent_step(params, state, args):
+    branch_mask = args[-2]
+    parameter_mask = args[-1]
+
     loss, grad = M_step_loss_fn_grad(params, args)
+    grad = (grad[0] * branch_mask, grad[1] * parameter_mask)
 
     updates, state = opt.update(
         grad, state, params, value=loss, grad=grad, value_fn=M_step_loss_fn, args=args
@@ -91,6 +95,7 @@ def optimize_parameters_expectation_maximization(
     level_order : jnp.array,
     inside_log_likelihoods : jnp.array,
     model_parameters : jnp.array,
+    model_parameters_mask : jnp.array,
     character_matrix : jnp.array,
     branch_lengths : jnp.array,
     branch_mask : jnp.array,
@@ -133,7 +138,13 @@ def optimize_parameters_expectation_maximization(
             jax.nn.sigmoid(params[1]), character_matrix, root
         )
         
-        params, its = M_step(params, (edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing, branch_mask))
+        args = (
+            edge_responsibilities, leaf_responsibilities, 
+            num_missing, num_not_missing, 
+            branch_mask, model_parameters_mask
+        )
+
+        params, its = M_step(params, args)
         current_nllh = compute_llh(params)
 
         if verbose:
@@ -166,6 +177,8 @@ class EMOptimizer:
         nu : float,
         phi : float,
         branch_mask : jnp.array,    # (2 * num_leaves - 1,) binary mask
+        fixed_nu : bool = False,
+        fixed_phi : bool = False
     ):
         """
         Fits branch lengths and model parameters to a phylogenetic tree using EM. Uses the
@@ -211,6 +224,7 @@ class EMOptimizer:
             level_order_jax,
             self.inside_log_likelihoods, 
             jnp.array([nu, phi]), 
+            jnp.array([0.0 if fixed_nu else 1.0, 0.0 if fixed_phi else 1.0]),
             self.character_matrix, 
             branch_lengths, 
             branch_mask,
@@ -284,6 +298,7 @@ def main(mode, phylo_opt):
                 level_order_jax,
                 phylo_opt.inside_log_likelihoods, 
                 phylo_opt.model_parameters, 
+                jnp.array([1.0, 1.0]),
                 phylogeny.character_matrix, 
                 phylo_opt.branch_lengths, 
                 jnp.ones(2 * phylogeny.num_leaves - 1),
@@ -298,7 +313,7 @@ def main(mode, phylo_opt):
         compile_time = end - start
 
         start = time.time()
-        nllh, branch_lengths, model_parameters, em_iterations = optimize_helper(True)
+        nllh, post_branch_lengths, model_parameters, em_iterations = optimize_helper(True)
         nllh.block_until_ready()
         end = time.time()
 
