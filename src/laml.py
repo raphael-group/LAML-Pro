@@ -40,7 +40,7 @@ are non-missing states, and -1 is the unknown (?) state.
 """
 
 M_STEP_RELATIVE_STOPPING_CRITERION = 1e-8
-EM_STOPPING_CRITERION = 1e-4
+EM_STOPPING_CRITERION = 1e-5
 
 def M_step_loss_fn(parameters, args):
     log_branch_lengths, logit_model_parameters = parameters
@@ -83,8 +83,8 @@ def M_step(params, args):
         return (params, state), None
     
     state = opt.init(params)
-    (params, state), _ = jax.lax.scan(body_fun, (params, state), jnp.arange(200))
-    return params, 200
+    (params, state), _ = jax.lax.scan(body_fun, (params, state), jnp.arange(100))
+    return params, 100
 
 def optimize_parameters_expectation_maximization(
     leaves : jnp.array,
@@ -307,8 +307,7 @@ if __name__ == "__main__":
         if args.mode == "optimize-direct":
             branch_lengths = jnp.ones(2 * n - 1)
         else:
-            branch_lengths = jnp.array([random.uniform(0.01, 3.0) for i in range(2 * n - 1)]) # TODO: give names to constants
-            #branch_lengths = jnp.ones(2 * n - 1)
+            branch_lengths = jnp.array([random.uniform(0.01, 0.5) for i in range(2 * n - 1)]) # TODO: give names to constants
     else:
         branch_lengths = jnp.array([tree.nodes[i]["branch_length"] for i in range(2 * n - 1)])
 
