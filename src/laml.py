@@ -39,8 +39,8 @@ of the alphabet, 0 is the missing state, 1, ..., A
 are non-missing states, and -1 is the unknown (?) state.
 """
 
-M_STEP_RELATIVE_STOPPING_CRITERION = 1e-9
-EM_STOPPING_CRITERION = 1e-5
+M_STEP_RELATIVE_STOPPING_CRITERION = 1e-8
+EM_STOPPING_CRITERION = 1e-4
 
 def M_step_loss_fn(parameters, args):
     log_branch_lengths, logit_model_parameters = parameters
@@ -56,11 +56,11 @@ def M_step_loss_fn(parameters, args):
     return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + c6)
 
 jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
-M_step_loss_fn_grad = jax.jit(jax.value_and_grad(M_step_loss_fn))
+M_step_loss_fn_grad = jax.value_and_grad(M_step_loss_fn)
     
 ######### SETUP M-STEP OPTIMIZER #########
 linesearch = optax.scale_by_backtracking_linesearch(max_backtracking_steps=15)
-opt = optax.chain(optax.lbfgs(memory_size=10), linesearch)
+opt = optax.chain(optax.lbfgs(), linesearch)
 
 @partial(jax.jit)
 def M_step_descent_step(params, state, args):
@@ -74,7 +74,7 @@ def M_step_descent_step(params, state, args):
     )
 
     params = optax.apply_updates(params, updates)
-    return loss, params, state
+    return loss, params, state, grad
     
 def optimize_parameters_expectation_maximization(
     leaves : jnp.array,
@@ -124,19 +124,20 @@ def optimize_parameters_expectation_maximization(
             parent_sibling, level_order, inside_log_likelihoods, 
             jax.nn.sigmoid(params[1]), character_matrix, root
         )
-       
-        previous_loss = jnp.inf
+        
+        previous_grad_norm = jnp.inf
         its           = 0
         state         = opt.init(params)
         while True:
-            current_loss, params, state = M_step_descent_step(
+            current_loss, params, state, grad = M_step_descent_step(
                 params, state, (edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing)
             )
-
-            if jnp.abs(previous_loss - current_loss) < M_STEP_RELATIVE_STOPPING_CRITERION:
+            grad_norm = jnp.sqrt(jnp.sum(grad[0] ** 2) + jnp.sum(grad[1] ** 2))
+            if jnp.abs(grad_norm - previous_grad_norm) < M_STEP_RELATIVE_STOPPING_CRITERION:
                 break
 
             previous_loss = current_loss
+            previous_grad_norm = grad_norm
             its += 1
 
         current_nllh = compute_llh(params)
