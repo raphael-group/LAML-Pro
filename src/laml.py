@@ -58,11 +58,10 @@ def M_step_loss_fn(parameters, args):
 jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
 M_step_loss_fn_grad = jax.value_and_grad(M_step_loss_fn)
     
-######### SETUP M-STEP OPTIMIZER #########
 linesearch = optax.scale_by_backtracking_linesearch(max_backtracking_steps=15)
-opt = optax.chain(optax.lbfgs(), linesearch)
+opt = optax.chain(optax.lbfgs(scale_init_precond=True), linesearch)
 
-@partial(jax.jit)
+@jax.jit
 def M_step_descent_step(params, state, args):
     edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing = args
 
@@ -76,6 +75,17 @@ def M_step_descent_step(params, state, args):
     params = optax.apply_updates(params, updates)
     return loss, params, state, grad
     
+@jax.jit
+def M_step(params, args):
+    def body_fun(carry, _):
+        params, state = carry
+        _, params, state, _ = M_step_descent_step(params, state, args)
+        return (params, state), None
+    
+    state = opt.init(params)
+    (params, state), _ = jax.lax.scan(body_fun, (params, state), jnp.arange(200))
+    return params, 200
+
 def optimize_parameters_expectation_maximization(
     leaves : jnp.array,
     internal_postorder : jnp.array,
@@ -125,21 +135,7 @@ def optimize_parameters_expectation_maximization(
             jax.nn.sigmoid(params[1]), character_matrix, root
         )
         
-        previous_grad_norm = jnp.inf
-        its           = 0
-        state         = opt.init(params)
-        while True:
-            current_loss, params, state, grad = M_step_descent_step(
-                params, state, (edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing)
-            )
-            grad_norm = jnp.sqrt(jnp.sum(grad[0] ** 2) + jnp.sum(grad[1] ** 2))
-            if jnp.abs(grad_norm - previous_grad_norm) < M_STEP_RELATIVE_STOPPING_CRITERION:
-                break
-
-            previous_loss = current_loss
-            previous_grad_norm = grad_norm
-            its += 1
-
+        params, its = M_step(params, (edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing))
         current_nllh = compute_llh(params)
 
         if verbose:
