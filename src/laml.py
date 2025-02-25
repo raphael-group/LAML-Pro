@@ -39,10 +39,12 @@ are non-missing states, and -1 is the unknown (?) state.
 
 M_STEP_DESCENT_STEPS  = 100
 EM_STOPPING_CRITERION = 1e-5
+ULTRAMETRIC_VIOLATION_PENALTY = 10.0
 
 def M_step_loss_fn(parameters, args):
-    log_branch_lengths, logit_model_parameters = parameters
+    log_branch_lengths, logit_model_parameters, scale = parameters
     edge_responsibilities, leaf_responsibilities, num_missing, num_not_missing = args[:4]
+    ultrametric_constraint_matrix = args[-1]
     branch_lengths = jnp.exp(log_branch_lengths)
     ν, ϕ           = jax.nn.sigmoid(logit_model_parameters)
     c1 = -edge_responsibilities[:, 0] * branch_lengths *  (1.0 + ν)
@@ -51,7 +53,13 @@ def M_step_loss_fn(parameters, args):
     c4 = -edge_responsibilities[:, 3] * branch_lengths * ν
     c5 =  edge_responsibilities[:, 4] * jnp.log(1 - jnp.exp(-branch_lengths * ν))
     c6 = num_not_missing * jnp.log(1 - ϕ) + (num_missing - jnp.sum(leaf_responsibilities)) * jnp.log(ϕ)
-    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + c6)
+
+    if ultrametric_constraint_matrix is not None:
+        ultrametric_violation = jnp.sum(jnp.abs(ultrametric_constraint_matrix @ branch_lengths - scale))
+    else:
+        ultrametric_violation = 0.0
+
+    return -(jnp.sum(c1 + c2 + c3 + c4 + c5) + c6) + ULTRAMETRIC_VIOLATION_PENALTY * ultrametric_violation
 
 jit_compute_log_likelihood = jax.jit(calc.compute_log_likelihood)
 M_step_loss_fn_grad = jax.value_and_grad(M_step_loss_fn)
@@ -61,11 +69,11 @@ opt = optax.chain(optax.lbfgs(scale_init_precond=True), linesearch)
 
 @jax.jit
 def M_step_descent_step(params, state, args):
-    branch_mask = args[-2]
-    parameter_mask = args[-1]
+    branch_mask = args[-3]
+    parameter_mask = args[-2]
 
     loss, grad = M_step_loss_fn_grad(params, args)
-    grad = (grad[0] * branch_mask, grad[1] * parameter_mask)
+    grad = (grad[0] * branch_mask, grad[1] * parameter_mask, grad[2])
 
     updates, state = opt.update(
         grad, state, params, value=loss, grad=grad, value_fn=M_step_loss_fn, args=args
@@ -99,7 +107,8 @@ def optimize_parameters_expectation_maximization(
     branch_mask : jnp.array,
     mutation_priors : jnp.array,
     root : int,
-    verbose = False
+    verbose = False,
+    ultrametric_constraint_matrix = None
 ):
     model_parameters = jnp.maximum(model_parameters, calc.EPS)
     model_parameters = jnp.minimum(model_parameters, 1.0 - calc.EPS)
@@ -112,7 +121,7 @@ def optimize_parameters_expectation_maximization(
     num_not_missing = jnp.sum(character_matrix != -1, axis=[0,1]) # shape (num_leaves,)
 
     # uses equation (12) in LAML manuscript to setup the loss function
-    params = (log_branch_lengths, logit_model_parameters)
+    params = (log_branch_lengths, logit_model_parameters, 1.0)
 
     compute_llh = lambda params: jit_compute_log_likelihood(
         jnp.exp(params[0]), mutation_priors, leaves, 
@@ -139,7 +148,8 @@ def optimize_parameters_expectation_maximization(
         args = (
             edge_responsibilities, leaf_responsibilities, 
             num_missing, num_not_missing, 
-            branch_mask, model_parameters_mask
+            branch_mask, model_parameters_mask,
+            ultrametric_constraint_matrix
         )
 
         params, its = M_step(params, args)
@@ -155,7 +165,7 @@ def optimize_parameters_expectation_maximization(
 
         previous_nllh = current_nllh
 
-    return current_nllh, jnp.exp(params[0]), jax.nn.sigmoid(params[1]), iteration
+    return current_nllh, jnp.exp(params[0]), jax.nn.sigmoid(params[1]), params[2], iteration
 
 def build_tree_data_structures(tree, root, num_leaves):
     leaves = jnp.array([n for n in tree.nodes() if tree.out_degree(n) == 0])
@@ -233,7 +243,7 @@ class EMOptimizer:
 
         ds = build_tree_data_structures(tree, self.root, self.num_leaves)
 
-        llh, branch_lengths, (nu, phi), em_iterations = optimize_parameters_expectation_maximization(
+        llh, branch_lengths, (nu, phi), scale, em_iterations = optimize_parameters_expectation_maximization(
             ds["leaves"], 
             ds["internal_postorder"], 
             ds["internal_postorder_children"], 
@@ -305,7 +315,8 @@ def main(mode, phylo_opt):
                 jnp.ones(2 * phylogeny.num_leaves - 1),
                 phylogeny.mutation_priors, 
                 phylogeny.root,
-                verbose=verbose
+                verbose=verbose,
+                ultrametric_constraint_matrix=ds["ultrametric_constraint_matrix"]
             )
 
         start = time.time()
@@ -314,15 +325,15 @@ def main(mode, phylo_opt):
         compile_time = end - start
 
         start = time.time()
-        nllh, post_branch_lengths, model_parameters, em_iterations = optimize_helper(True)
+        nllh, branch_lengths, model_parameters, scale, em_iterations = optimize_helper(True)
         nllh.block_until_ready()
         end = time.time()
 
         optimizer_specific_results = {"em_iterations": em_iterations}
 
         lg.logger.info(f"Compile time (s): {compile_time}, Optimization time (s): {end - start}")
+        lg.logger.info(f"Optimized time scale: {scale}")
         lg.logger.info(f"Optimized negative log likelihood(s): {nllh}")
-        # lg.logger.info(f"Optimized branch lengths: {branch_lengths}")
         lg.logger.info(f"Optimized ν: {model_parameters[0]}, Optimized ϕ: {model_parameters[1]}")
 
     if "optimize" in mode:
