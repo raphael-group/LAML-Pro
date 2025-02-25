@@ -1,7 +1,6 @@
 import jax 
 import numpy as np
 import jax.numpy as jnp
-import equinox.internal as eqxi
 
 EPS = 1e-6
 
