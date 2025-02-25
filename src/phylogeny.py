@@ -155,3 +155,14 @@ def parse_newick(newick):
 
     tree = nx.relabel_nodes(tree, relabeling_map)
     return tree, num_leaves
+
+def write_newick(tree: nx.DiGraph, branch_lengths : jnp.array, root : int) -> str:
+    def recurse(node):
+        children = list(tree.successors(node))
+        label = tree.nodes[node].get("label", str(node))
+        length = float(branch_lengths[node])
+        if not children:
+            return f"{label}:{length}"
+        return f"({','.join(recurse(ch) for ch in children)}){label}:{length}"
+
+    return recurse(root) + ";"

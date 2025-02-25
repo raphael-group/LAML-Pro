@@ -39,7 +39,7 @@ are non-missing states, and -1 is the unknown (?) state.
 
 M_STEP_DESCENT_STEPS  = 100
 EM_STOPPING_CRITERION = 1e-5
-ULTRAMETRIC_VIOLATION_PENALTY = 10.0
+ULTRAMETRIC_VIOLATION_PENALTY = 25.0
 
 def M_step_loss_fn(parameters, args):
     log_branch_lengths, logit_model_parameters, scale = parameters
@@ -269,15 +269,15 @@ class EMOptimizer:
         }
 
 def main(mode, phylo_opt):
-    phylogeny = phylo_opt.phylogeny
+    phylo = phylo_opt.phylogeny
 
-    ds = build_tree_data_structures(phylogeny.tree, phylogeny.root, phylogeny.num_leaves)
+    ds = build_tree_data_structures(phylo.tree, phylo.root, phylo.num_leaves)
 
     if mode == "score":
         def llh_helper():
             return calc.compute_log_likelihood(
                 phylo_opt.branch_lengths,
-                phylogeny.mutation_priors, 
+                phylo.mutation_priors, 
                 ds["leaves"], 
                 ds["internal_postorder"],
                 ds["internal_postorder_children"],
@@ -285,8 +285,8 @@ def main(mode, phylo_opt):
                 ds["level_order"], 
                 phylo_opt.inside_log_likelihoods, 
                 phylo_opt.model_parameters,
-                phylogeny.character_matrix, 
-                phylogeny.root
+                phylo.character_matrix, 
+                phylo.root
             )
 
         llh_helper = jax.jit(llh_helper)
@@ -296,7 +296,7 @@ def main(mode, phylo_opt):
         runtime = timeit.timeit(lambda: llh_helper().block_until_ready(), number=NUM_ITER)
         avg_runtime = runtime / NUM_ITER
 
-        root = [n for n in phylogeny.tree.nodes() if phylogeny.tree.in_degree(n) == 0][0]
+        root = [n for n in phylo.tree.nodes() if phylo.tree.in_degree(n) == 0][0]
         lg.logger.info(f"Log likelihood at root {root}: {llh}")
         lg.logger.info(f"Average runtime (s): {avg_runtime}")
     elif mode == "optimize-em":
@@ -310,13 +310,13 @@ def main(mode, phylo_opt):
                 phylo_opt.inside_log_likelihoods, 
                 phylo_opt.model_parameters, 
                 jnp.array([1.0, 1.0]),
-                phylogeny.character_matrix, 
+                phylo.character_matrix, 
                 phylo_opt.branch_lengths, 
-                jnp.ones(2 * phylogeny.num_leaves - 1),
-                phylogeny.mutation_priors, 
-                phylogeny.root,
+                jnp.ones(2 * phylo.num_leaves - 1),
+                phylo.mutation_priors, 
+                phylo.root,
                 verbose=verbose,
-                ultrametric_constraint_matrix=ds["ultrametric_constraint_matrix"]
+                ultrametric_constraint_matrix=None#ds["ultrametric_constraint_matrix"]
             )
 
         start = time.time()
@@ -349,6 +349,11 @@ def main(mode, phylo_opt):
             res = res | optimizer_specific_results
 
             f.write(json.dumps(res))
+
+        newick_str = phylogeny.write_newick(phylo.tree, branch_lengths, phylo.root)
+        with open(f"{args.output}_tree.newick", "w") as f:
+            f.write(newick_str)
+            f.write("\n")
 
 def parse_args():
     p = argparse.ArgumentParser()
