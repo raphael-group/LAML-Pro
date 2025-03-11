@@ -180,7 +180,7 @@ public:
      * @param root The ID of the starting vertex.
      * @return std::vector<int> A vector of vertex IDs in preorder.
      */
-    std::vector<int> preorder_traversal(int root) {
+    std::vector<int> preorder_traversal(int root) const {
         std::vector<int> preorder;
         std::stack<int> call_stack;
         call_stack.push(root);
@@ -205,7 +205,7 @@ public:
      * @param root The ID of the starting vertex.
      * @return std::vector<int> A vector of vertex IDs in postorder.
      */
-    std::vector<int> postorder_traversal(int root) {
+    std::vector<int> postorder_traversal(int root) const {
         std::stack<int> call_stack;
         call_stack.push(root);
 

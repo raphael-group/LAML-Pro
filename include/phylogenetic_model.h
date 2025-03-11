@@ -1,0 +1,65 @@
+#ifndef PHYLOGENETIC_MODEL_H
+#define PHYLOGENETIC_MODEL_H
+
+#include <vector>
+
+class phylogenetic_model {
+public:
+    int num_taxa;
+    std::vector<int> alphabet_sizes; /* The size of this is the number of characters */
+    std::vector<double> parameters;  /* The set of non-branch length parameters for the model */
+
+    virtual ~phylogenetic_model() = default;
+
+    /**
+     * @brief Computes the product of the probability matrix with a vector in 
+     *        log space for a specific character. Specifically, this computes 
+     *        log(P^{c}v) where P^{c} is the probability transition matrix for 
+     *        character c with branch length b.
+     * 
+     * @param character The character index
+     * @param branch_length The branch length
+     * @param log_vector Input vector in log space
+     * @return Result vector of the product
+     */
+    virtual std::vector<double> compute_log_pmatrix_vector_product(
+        int character, 
+        double branch_length, 
+        const std::vector<double>& log_vector) const = 0;
+
+    /**
+     * @brief Computes the product of the transpose probability matrix 
+     *        with a vector in log space for a specific character. Specifically, 
+     *        this computes log(v^TP^{c}) where P^{c} is the probability transition
+     *        matrix for character c with branch length b.
+     * 
+     * @param character The character index
+     * @param branch_length The branch length
+     * @param log_vector Input vector in log space
+     * @return Result vector of the product
+     */
+    virtual std::vector<double> compute_log_pmatrix_transpose_vector_product(
+        int character,
+        double branch_length,
+        const std::vector<double>& log_vector) const = 0;
+
+    /**
+     * Computes the log likelihood for a specific taxa and character.
+     * @param character The character index
+     * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
+     * @return Vector of log likelihoods for each state
+     */
+    virtual std::vector<double> compute_taxa_log_inside_likelihood(
+        int character, 
+        int taxa_id) const = 0;
+
+    /**
+     * Computes the root distribution for a specific character.
+     * @param character The character index
+     * @return Vector containing the root distribution
+     */
+    virtual std::vector<double> compute_root_distribution(
+        int character) const = 0;
+};
+
+#endif // PHYLOGENETIC_MODEL_H

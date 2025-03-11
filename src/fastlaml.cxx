@@ -13,17 +13,17 @@
 
 /* 
 * @brief A struct to hold a rooted tree without attaching parameters.
-
-* @param tree The tree as a directed graph, where the nodes are
-*             numbered from 0 to 2N - 1 and the leaves are numbered 
-*             from 0 to N - 1.
-* @param branch_lengths Stores the branch length on the edge leading to each node.
+*
+* @param tree The tree as a directed graph, where the vertices are numbered from 0 to 
+*             2N - 1 and the leaves are numbered from 0 to N - 1.
+* @param branch_lengths Stores the branch length on the edge leading into each node.
 * @param node_names Stores the name of each node.
+* @param root_id The ID of the root vertex of the tree.
 */
-struct Tree {
+struct tree {
     size_t num_leaves;
     size_t num_nodes;
-    size_t root;   
+    size_t root_id;   
     digraph<size_t> tree;
     std::vector<double> branch_lengths;
     std::vector<std::string> node_names;
@@ -34,7 +34,7 @@ struct Tree {
 * @param fname The path to the Newick tree file.
 * @return Tree The parsed tree.
 */
-Tree parse_newick_tree(std::string fname) {
+tree parse_newick_tree(std::string fname) {
     compact_tree tree(fname);
 
     size_t num_nodes = tree.get_num_nodes();
@@ -60,13 +60,18 @@ Tree parse_newick_tree(std::string fname) {
         name_map[i] = id;
     }
 
+    int root_id = name_map[0];
     for (size_t i = 0; i < num_nodes; i++) {
         for (auto child : tree.get_children(i)) {
             g.add_edge(name_map[i], name_map[child]);
         }
     }
 
-    return {num_leaves, num_nodes, tree.get_root(), g, branch_lengths, node_names};
+    if (root_id == -1) {
+        throw std::runtime_error("Root node not found in tree");
+    }
+
+    return {num_leaves, num_nodes, (size_t) root_id, g, branch_lengths, node_names};
 }
 
 int main(int argc, char ** argv) {
@@ -113,24 +118,25 @@ int main(int argc, char ** argv) {
         std::exit(1);
     }
 
-    Tree tree = parse_newick_tree(program.get<std::string>("--tree"));
+    spdlog::info("Parsing Newick tree file...");
+    tree t = parse_newick_tree(program.get<std::string>("--tree"));
     spdlog::info("Tree Summary:");
-    spdlog::info("  Number of leaves: {}", tree.num_leaves);
-    spdlog::info("  Total number of nodes: {}", tree.num_nodes);
-    spdlog::info("  Root: {}", tree.root);
+    spdlog::info("  Number of leaves: {}", t.num_leaves);
+    spdlog::info("  Total number of nodes: {}", t.num_nodes);
+    spdlog::info("  Root: {}", t.tree[t.root_id].data);
 
     spdlog::info("Node details:");
-    for (size_t i = 0; i < tree.num_nodes; i++) {
-        int j = tree.tree[i].data;
+    for (size_t i = 0; i < t.num_nodes; i++) {
+        int j = t.tree[i].data;
         std::ostringstream children;
-        for (auto child : tree.tree.successors(i)) {
-            children << tree.tree[child].data << " ";
+        for (auto child : t.tree.successors(i)) {
+            children << t.tree[child].data << " ";
         }
         
         spdlog::info("  Node {}: name='{}', branch_length={}, children=[{}]", 
                     j, 
-                    tree.node_names[j].empty() ? "<unnamed>" : tree.node_names[j], 
-                    tree.branch_lengths[j],
+                    t.node_names[j].empty() ? "<unnamed>" : t.node_names[j], 
+                    t.branch_lengths[j],
                     children.str());
     }
 
