@@ -15,12 +15,6 @@
 #include <string>
 #include <sstream>
 
-/*
-  Simple adjacency list representation of a DiGraph where the 
-  vertices are represented as integers from 0 to N - 1. And
-  the vertices have data associated with them.
-*/
-
 template <class T>
 class vertex {
 public:
@@ -30,6 +24,14 @@ public:
     vertex(int id, T data) : id(id), data(data) {};
 };
 
+/**
+ * @brief An adjacency list representation of a directed graph.
+ * 
+ * The vertices are represented as integers from 0 to N-1, with
+ * each vertex having arbitrary data (of type T) associated with it.
+ * 
+ * @tparam T The type of data stored in each vertex.
+ */
 template <class T>
 class digraph {
 private:
@@ -39,7 +41,12 @@ private:
     std::vector<std::vector<int>> pred;
     std::vector<vertex<T>> vertices;
 public:
-    // returns id of created vertex
+    /**
+     * @brief Creates a new vertex in the graph.
+     * 
+     * @param data The data to store in the new vertex.
+     * @return int The ID of the newly created vertex.
+     */
     int add_vertex(T data) {
         vertex<T> v(id_counter, data);
         vertices.push_back(v);
@@ -49,15 +56,31 @@ public:
         return v.id;
     }
 
+    /**
+     * @brief Adds a directed edge from vertex u to vertex v.
+     * 
+     * @param u The ID of the source vertex.
+     * @param v The ID of the destination vertex.
+     */
     void add_edge(int u, int v) {
         succ[u].push_back(v);
         pred[v].push_back(u);
     }
 
+    /**
+     * @brief Returns the number of vertices in the graph.
+     * 
+     * @return size_t The number of vertices.
+     */
     size_t size() const {
         return vertices.size();
     }
 
+    /**
+     * @brief Returns a vector of all vertex IDs in the graph.
+     * 
+     * @return std::vector<int> A vector containing all vertex IDs.
+     */
     std::vector<int> nodes() const {
         std::vector<int> vertices;
         for (int i = 0; i < id_counter; i++) {
@@ -66,6 +89,11 @@ public:
         return vertices;
     }
 
+    /**
+     * @brief Returns all edges in the graph as pairs of vertex IDs.
+     * 
+     * @return std::vector<std::pair<int, int>> A vector of (source, destination) vertex ID pairs.
+     */
     std::vector<std::pair<int, int>> edges() const {
         std::vector<std::pair<int, int>> edges;
         for (size_t u = 0; u < succ.size(); u++) {
@@ -76,34 +104,82 @@ public:
         return edges;
     }
 
+     /**
+     * @brief Access a vertex by its ID.
+     * 
+     * @param u The ID of the vertex to access.
+     * @return vertex<T>& A reference to the vertex.
+     */
     vertex<T>& operator[](int u) {
         return vertices[u];
     }
 
+    /**
+     * @brief Access a vertex by its ID (const version).
+     * 
+     * @param u The ID of the vertex to access.
+     * @return const vertex<T>& A const reference to the vertex.
+     */
     const vertex<T>& operator[](int u) const {
         return vertices[u];
     }
 
+    /**
+     * @brief Returns the predecessors (in-neighbors) of a vertex.
+     * 
+     * @param u The ID of the vertex.
+     * @return const std::vector<int>& A vector of vertex IDs that have edges to u.
+     */
     const std::vector<int>& predecessors(int u) const {
         return pred[u];
     }
 
+    /**
+     * @brief Returns the successors (out-neighbors) of a vertex.
+     * 
+     * @param u The ID of the vertex.
+     * @return const std::vector<int>& A vector of vertex IDs that u has edges to.
+     */
     const std::vector<int>& successors(int u) const {
         return succ[u];
     }
 
+    /**
+     * @brief Checks if a vertex with the given ID exists in the graph.
+     * 
+     * @param u The ID to check.
+     * @return bool True if the vertex exists, false otherwise.
+     */
     bool contains(int u) const {
         return vertices.find(u) != vertices.end();
     }
 
+    /**
+     * @brief Returns the in-degree of a vertex (number of incoming edges).
+     * 
+     * @param u The ID of the vertex.
+     * @return size_t The in-degree of the vertex.
+     */
     size_t in_degree(int u) const {
         return pred[u].size();
     }
 
+     /**
+     * @brief Returns the out-degree of a vertex (number of outgoing edges).
+     * 
+     * @param u The ID of the vertex.
+     * @return size_t The out-degree of the vertex.
+     */
     size_t out_degree(int u) const {
         return succ[u].size();
     }
 
+    /**
+     * @brief Performs a preorder traversal of the graph starting from the given root.
+     * 
+     * @param root The ID of the starting vertex.
+     * @return std::vector<int> A vector of vertex IDs in preorder.
+     */
     std::vector<int> preorder_traversal(int root) {
         std::vector<int> preorder;
         std::stack<int> call_stack;
@@ -123,6 +199,12 @@ public:
         return preorder;
     }
 
+    /**
+     * @brief Performs a postorder traversal of the graph starting from the given root.
+     * 
+     * @param root The ID of the starting vertex.
+     * @return std::vector<int> A vector of vertex IDs in postorder.
+     */
     std::vector<int> postorder_traversal(int root) {
         std::stack<int> call_stack;
         call_stack.push(root);
@@ -164,8 +246,16 @@ public:
         return postorder;
     }
 
-    /*
-     * Returns true if u is an ancestor of v in the given tree.
+    /**
+     * @brief Checks if vertex u is an ancestor of vertex v in the given tree.
+     * 
+     * This is a friend function that determines whether u is an ancestor of v
+     * in the directed graph interpreted as a tree.
+     * 
+     * @param tree The directed graph to check.
+     * @param u The potential ancestor vertex ID.
+     * @param v The potential descendant vertex ID.
+     * @return bool True if u is an ancestor of v, false otherwise.
      */
     friend bool ancestor(const digraph<T>& tree, int u, int v) {
         if (u == v) {
@@ -181,62 +271,5 @@ public:
         return false;
     }
 };
-
-template <class T>
-std::string to_adjacency_list(const digraph<T>& G, const std::unordered_map<int, int>& vertex_map) {
-    std::stringstream ss;
-    for (const auto& u : G.nodes()) {
-        ss << G[u].data.id << " ";
-        for (const auto& v : G.successors(u)) {
-            ss << G[v].data.id << " ";
-        }
-        ss << std::endl;
-    }
-    return ss.str();
-}
-
-/*
- * Parses an adjacency list into a directed graph object, 
- * where the vertices are read in as integers.
- */
-inline std::pair<digraph<int>, std::unordered_map<int, int>> parse_adjacency_list(const std::string& filename) {
-    digraph<int> g;
-
-    std::ifstream file(filename);
-    std::string line;
-    std::unordered_map<int, int> vertex_map;
-
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not open file " + filename);
-    }
-
-    while (std::getline(file, line)) {
-        if (line.length() < 1 || line[0] == '#') {
-            continue;
-        }
-
-        std::istringstream iss(line);
-        int src, tgt;
-
-        if (!(iss >> src)) {
-            break;
-        }
-
-        if (vertex_map.find(src) == vertex_map.end()) {
-            vertex_map[src] = g.add_vertex(src);
-        }
-
-        while (iss >> tgt) {
-            if (vertex_map.find(tgt) == vertex_map.end()) {
-                vertex_map[tgt] = g.add_vertex(tgt);
-            }
-
-            g.add_edge(vertex_map[src], vertex_map[tgt]);
-        }
-    }
-
-    file.close();
-    return std::make_pair(g, vertex_map);
-}
 
 #endif
