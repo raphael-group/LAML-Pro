@@ -24,7 +24,7 @@ public:
     vertex(int id, T data) : id(id), data(data) {};
 };
 
-/**
+/*!
  * @brief An adjacency list representation of a directed graph.
  * 
  * The vertices are represented as integers from 0 to N-1, with
@@ -41,7 +41,7 @@ private:
     std::vector<std::vector<int>> pred;
     std::vector<vertex<T>> vertices;
 public:
-    /**
+    /*!
      * @brief Creates a new vertex in the graph.
      * 
      * @param data The data to store in the new vertex.
@@ -56,7 +56,7 @@ public:
         return v.id;
     }
 
-    /**
+    /*!
      * @brief Adds a directed edge from vertex u to vertex v.
      * 
      * @param u The ID of the source vertex.
@@ -67,7 +67,7 @@ public:
         pred[v].push_back(u);
     }
 
-    /**
+    /*!
      * @brief Returns the number of vertices in the graph.
      * 
      * @return size_t The number of vertices.
@@ -76,7 +76,7 @@ public:
         return vertices.size();
     }
 
-    /**
+    /*!
      * @brief Returns a vector of all vertex IDs in the graph.
      * 
      * @return std::vector<int> A vector containing all vertex IDs.
@@ -89,7 +89,7 @@ public:
         return vertices;
     }
 
-    /**
+    /*!
      * @brief Returns all edges in the graph as pairs of vertex IDs.
      * 
      * @return std::vector<std::pair<int, int>> A vector of (source, destination) vertex ID pairs.
@@ -104,7 +104,7 @@ public:
         return edges;
     }
 
-     /**
+    /*!
      * @brief Access a vertex by its ID.
      * 
      * @param u The ID of the vertex to access.
@@ -114,7 +114,7 @@ public:
         return vertices[u];
     }
 
-    /**
+    /*!
      * @brief Access a vertex by its ID (const version).
      * 
      * @param u The ID of the vertex to access.
@@ -124,7 +124,7 @@ public:
         return vertices[u];
     }
 
-    /**
+    /*!
      * @brief Returns the predecessors (in-neighbors) of a vertex.
      * 
      * @param u The ID of the vertex.
@@ -134,7 +134,7 @@ public:
         return pred[u];
     }
 
-    /**
+    /*!
      * @brief Returns the successors (out-neighbors) of a vertex.
      * 
      * @param u The ID of the vertex.
@@ -144,7 +144,7 @@ public:
         return succ[u];
     }
 
-    /**
+    /*!
      * @brief Checks if a vertex with the given ID exists in the graph.
      * 
      * @param u The ID to check.
@@ -154,7 +154,7 @@ public:
         return vertices.find(u) != vertices.end();
     }
 
-    /**
+    /*!
      * @brief Returns the in-degree of a vertex (number of incoming edges).
      * 
      * @param u The ID of the vertex.
@@ -164,7 +164,7 @@ public:
         return pred[u].size();
     }
 
-     /**
+    /*!
      * @brief Returns the out-degree of a vertex (number of outgoing edges).
      * 
      * @param u The ID of the vertex.
@@ -174,7 +174,7 @@ public:
         return succ[u].size();
     }
 
-    /**
+    /*!
      * @brief Performs a preorder traversal of the graph starting from the given root.
      * 
      * @param root The ID of the starting vertex.
@@ -199,7 +199,7 @@ public:
         return preorder;
     }
 
-    /**
+    /*!
      * @brief Performs a postorder traversal of the graph starting from the given root.
      * 
      * @param root The ID of the starting vertex.
@@ -246,7 +246,7 @@ public:
         return postorder;
     }
 
-    /**
+    /*!
      * @brief Checks if vertex u is an ancestor of vertex v in the given tree.
      * 
      * This is a friend function that determines whether u is an ancestor of v
