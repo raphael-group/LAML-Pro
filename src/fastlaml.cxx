@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <stdexcept>
+#include <chrono>
 
 #include "csv.hpp"
 #include "digraph.h"
@@ -210,7 +211,6 @@ phylogeny_data process_phylogeny_data(
     const tree& t, const std::string& character_matrix_file, 
     const std::string& mutation_priors_file = "") {
     
-    spdlog::info("Parsing character matrix...");
     auto [taxa_names, raw_matrix] = parse_character_matrix(character_matrix_file);
     
     size_t num_characters = 0;
@@ -222,7 +222,6 @@ phylogeny_data process_phylogeny_data(
     
     std::vector<std::tuple<int, int, double>> raw_priors;
     if (!mutation_priors_file.empty()) {
-        spdlog::info("Parsing mutation priors...");
         raw_priors = parse_mutation_priors(mutation_priors_file);
     } else {
         spdlog::info("No mutation priors provided. Assuming uniform priors.");
@@ -233,7 +232,6 @@ phylogeny_data process_phylogeny_data(
     std::vector<std::map<int, int>> original_to_new_mappings(num_characters);
     size_t max_alphabet_size = 0;
     
-    spdlog::info("Recoding character states...");
     for (size_t c = 0; c < num_characters; ++c) {
         std::set<int> valid_states;
         for (const auto& row : raw_matrix) {
@@ -275,7 +273,6 @@ phylogeny_data process_phylogeny_data(
     std::vector<std::vector<int>> reordered_matrix(t.num_leaves, std::vector<int>(num_characters));
     std::vector<bool> leaf_mapped(t.num_leaves, false);
     
-    spdlog::info("Reordering rows to match tree structure...");
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (t.tree.out_degree(node_id) == 0) {
             size_t leaf_id = t.tree[node_id].data;
@@ -308,7 +305,6 @@ phylogeny_data process_phylogeny_data(
     
     std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(max_alphabet_size, 0.0));
     
-    spdlog::info("Recoding mutation priors...");
     for (const auto& [character, orig_state, probability] : raw_priors) {
         if (character < 0 || character >= static_cast<int>(num_characters)) {
             throw std::runtime_error("Character index out of range in mutation priors: " + std::to_string(character));
@@ -382,7 +378,7 @@ int main(int argc, char ** argv) {
         std::exit(1);
     }
 
-    spdlog::info("Parsing Newick tree file...");
+    spdlog::info("Loading tree from Newick file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
 
     spdlog::info("Processing character matrix and mutation priors...");
@@ -406,25 +402,14 @@ int main(int argc, char ** argv) {
     );
 
     likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
-    phylo.compute_inside_log_likelihood(inside_ll);
 
-    // Print likelihood buffer for debugging
-    std::cout << "Likelihood Buffer Values:\n";
-    std::cout << "Format: Node ID, Character ID: [values for each state]\n";
-    
-    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
-        if (t.tree.in_degree(node_id) != 0) continue;
-        for (size_t char_id = 0; char_id < data.num_characters; ++char_id) {
-            std::cout << "Node " << t.tree[node_id].data << ", Character " << char_id << ": [";
-            for (size_t state = 0; state < data.max_alphabet_size + 2; ++state) {
-                std::cout << inside_ll(char_id, t.tree[node_id].data, state);
-                if (state < data.max_alphabet_size + 1) {
-                    std::cout << ", ";
-                }
-            }
-            std::cout << "]\n";
-        }
-    }
+    auto start = std::chrono::high_resolution_clock::now();
+    double llh = phylo.compute_inside_log_likelihood(inside_ll);
+    auto end = std::chrono::high_resolution_clock::now();
+    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    spdlog::info("Log likelihood: {}", llh);
+    spdlog::info("Computation time: {} ms", runtime);
 
     return 0;
 }

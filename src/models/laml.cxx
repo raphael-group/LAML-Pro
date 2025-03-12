@@ -7,6 +7,8 @@
 #include <numeric>
 #include <cmath>
 
+#define NEGATIVE_INFINITY -1e7
+
 template <typename Iter>
 typename std::iterator_traits<Iter>::value_type
 log_sum_exp(Iter begin, Iter end)
@@ -21,14 +23,13 @@ log_sum_exp(Iter begin, Iter end)
     return max_elem + std::log(sum);
 }
 
-std::vector<double> laml_model::compute_log_pmatrix_vector_product(
+void laml_model::compute_log_pmatrix_vector_product(
     size_t character, 
     double branch_length, 
-    const std::vector<double>& log_vector
+    const std::vector<double>& log_vector,
+    std::vector<double>& result
 ) const {
     double nu = this->parameters[0];
-
-    std::vector<double> result(this->alphabet_sizes[character]);
     std::vector<double> tmp(log_vector.begin(), log_vector.end()); // tmp LSE array
 
     /* Handle i = 0 which is state = ? case */
@@ -38,7 +39,7 @@ std::vector<double> laml_model::compute_log_pmatrix_vector_product(
     tmp[0] += std::log(1 - std::exp(-branch_length * nu));
     tmp[1] += -branch_length * (1 + nu);
     for (size_t j = 2; j < this->alphabet_sizes[character]; j++) {
-        tmp[j] += std::log(this->mutation_priors[character][j - 2])
+        tmp[j] += this->log_mutation_priors[character][j - 2]
                  - branch_length * nu + std::log(1 - std::exp(-branch_length));
     }
     result[1] = log_sum_exp(tmp.begin(), tmp.end());
@@ -50,31 +51,26 @@ std::vector<double> laml_model::compute_log_pmatrix_vector_product(
         tmp2[1] = log_vector[0] + std::log(1 - std::exp(-branch_length * nu));
         result[i] = log_sum_exp(tmp2, tmp2 + 2);
     }
-
-    return result;
 }
 
-std::vector<double> laml_model::compute_log_pmatrix_transpose_vector_product(
+void laml_model::compute_log_pmatrix_transpose_vector_product(
     size_t character, 
     double branch_length, 
-    const std::vector<double>& log_vector
+    const std::vector<double>& log_vector,
+    std::vector<double>& result
 ) const {
-    std::vector<double> result(this->alphabet_sizes[character], -1.0);
-    return result;
 }
 
-std::vector<double> laml_model::compute_taxa_log_inside_likelihood(
+void laml_model::compute_taxa_log_inside_likelihood(
     size_t character, 
-    size_t taxa_id
+    size_t taxa_id,
+    std::vector<double>& result
 ) const {
     double phi = this->parameters[1];
     int state = this->character_matrix[taxa_id][character];
     
     double log_phi = std::log(phi);
-    std::vector<double> result(
-        this->alphabet_sizes[character], 
-        -1e7//std::numeric_limits<double>::infinity()
-    );
+    std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
 
     if (state == -1) {
         result[0] = 0.0;
@@ -84,11 +80,9 @@ std::vector<double> laml_model::compute_taxa_log_inside_likelihood(
     } else {
         result[state + 1] = std::log(1 - phi);
     }
-
-    return result;
 };
 
-std::vector<double> laml_model::compute_root_distribution(size_t character) const {
-    std::vector<double> result(this->alphabet_sizes[character], -1.0);
-    return result;
-}
+void laml_model::compute_root_distribution(size_t character, std::vector<double>& result) const {
+    std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
+    result[1] = 0.0; // root must start at unmutated state
+};

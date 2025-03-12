@@ -57,7 +57,7 @@ public:
         model(std::move(model))
     {}
 
-    void compute_inside_log_likelihood(likelihood_buffer& b); 
+    double compute_inside_log_likelihood(likelihood_buffer& b); 
 };
 
 #endif

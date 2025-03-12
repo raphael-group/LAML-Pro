@@ -21,10 +21,11 @@ public:
      * @param log_vector Input vector in log space
      * @return Result vector of the log-product of size alphabet_sizes[character]
      */
-    virtual std::vector<double> compute_log_pmatrix_vector_product(
+    virtual void compute_log_pmatrix_vector_product(
         size_t character, 
         double branch_length, 
-        const std::vector<double>& log_vector
+        const std::vector<double>& log_vector,
+        std::vector<double>& result
     ) const = 0;
 
     /*!
@@ -38,10 +39,11 @@ public:
      * @param log_vector Input vector in log space
      * @return Result vector of the log-product of size alphabet_sizes[character]
      */
-    virtual std::vector<double> compute_log_pmatrix_transpose_vector_product(
+    virtual void compute_log_pmatrix_transpose_vector_product(
         size_t character,
         double branch_length,
-        const std::vector<double>& log_vector
+        const std::vector<double>& log_vector,
+        std::vector<double>& result
     ) const = 0;
 
     /*!
@@ -50,9 +52,10 @@ public:
      * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
      * @return Vector of log likelihoods for each state of size alphabet_sizes[character]
      */
-    virtual std::vector<double> compute_taxa_log_inside_likelihood(
+    virtual void compute_taxa_log_inside_likelihood(
         size_t character, 
-        size_t taxa_id
+        size_t taxa_id,
+        std::vector<double>& result
     ) const = 0;
 
     /*!
@@ -60,8 +63,9 @@ public:
      * @param character The character index
      * @return Vector containing the root distribution of size alphabet_sizes[character]
      */
-    virtual std::vector<double> compute_root_distribution(
-        size_t character
+    virtual void compute_root_distribution(
+        size_t character,
+        std::vector<double>& result
     ) const = 0;
 };
 

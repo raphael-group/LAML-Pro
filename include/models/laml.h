@@ -14,6 +14,7 @@ class laml_model : public phylogenetic_model {
     digraph<size_t> tree;
     std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
     std::vector<std::vector<double>> mutation_priors; // [character][state]
+    std::vector<std::vector<double>> log_mutation_priors; // [character][state]
 
     laml_model(
         const digraph<size_t>& tree,
@@ -32,12 +33,20 @@ class laml_model : public phylogenetic_model {
 
             alphabet_sizes[i] = alphabet_size + 2;
         }
+
+        log_mutation_priors = std::vector<std::vector<double>>(mutation_priors.size());
+        for (size_t i = 0; i < mutation_priors.size(); i++) {
+            log_mutation_priors[i] = std::vector<double>(mutation_priors[i].size());
+            for (size_t j = 0; j < mutation_priors[i].size(); j++) {
+                log_mutation_priors[i][j] = std::log(mutation_priors[i][j]);
+            }
+        }
     }
 
-    std::vector<double> compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector) const override;
-    std::vector<double> compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector) const override;
-    std::vector<double> compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id) const override;
-    std::vector<double> compute_root_distribution(size_t character) const override;
+    void compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
+    void compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
+    void compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id, std::vector<double>& result) const override;
+    void compute_root_distribution(size_t character, std::vector<double>& result) const override;
 };
 
 #endif
