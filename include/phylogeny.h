@@ -2,6 +2,7 @@
 #define PHYLOGENETIC_H
 
 #include <vector>
+#include <memory>
 
 #include "digraph.h"
 #include "phylogenetic_model.h"
