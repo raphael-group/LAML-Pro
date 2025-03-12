@@ -4,6 +4,11 @@
 #include "../digraph.h"
 #include "../phylogenetic_model.h"
 
+/*
+* In the LAML model, we order the alphabet as {-1, 0, 1, 2, ...} where -1 is 
+* the missing data state, 0 is the unmutated state, and the remaining states
+* are the mutated states.
+*/
 class laml_model : public phylogenetic_model {
     public:
     digraph<size_t> tree;
@@ -17,7 +22,7 @@ class laml_model : public phylogenetic_model {
         double nu,
         double phi
     ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
-        parameters = {nu, phi};
+        parameters = {nu, phi}; // nu, phi
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
             int alphabet_size = 0;

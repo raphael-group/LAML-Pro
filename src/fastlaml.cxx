@@ -360,7 +360,7 @@ int main(int argc, char ** argv) {
 
     program.add_argument("-m", "--mutation-priors")
         .help("Path to the mutation priors file")
-        .required();
+        .default_value(std::string(""));
 
     program.add_argument("-c", "--character-matrix")
         .help("Path to the character matrix file (CSV)")
@@ -413,10 +413,11 @@ int main(int argc, char ** argv) {
     std::cout << "Format: Node ID, Character ID: [values for each state]\n";
     
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (t.tree.in_degree(node_id) != 0) continue;
         for (size_t char_id = 0; char_id < data.num_characters; ++char_id) {
             std::cout << "Node " << t.tree[node_id].data << ", Character " << char_id << ": [";
             for (size_t state = 0; state < data.max_alphabet_size + 2; ++state) {
-                std::cout << inside_ll(char_id, node_id, state);
+                std::cout << inside_ll(char_id, t.tree[node_id].data, state);
                 if (state < data.max_alphabet_size + 1) {
                     std::cout << ", ";
                 }
