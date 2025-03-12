@@ -40,7 +40,7 @@ void laml_model::compute_log_pmatrix_vector_product(
     size_t alphabet_size = this->alphabet_sizes[character];
     double nu = this->parameters[0];
 
-    std::vector<double>& tmp = d.buffer;
+    std::vector<double>& tmp = *(d.buffer);
     std::copy(log_vector.begin(), log_vector.begin() + alphabet_size, tmp.begin());
     
     /* Handle i = 0 which is state = ? case */

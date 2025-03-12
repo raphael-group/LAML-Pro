@@ -389,7 +389,7 @@ int main(int argc, char ** argv) {
     );
     
     laml_model model(t.tree, data.character_matrix, data.mutation_priors, 0.5, 0.5);
-    auto model_data = model.initialize_data(data.max_alphabet_size + 2, t.branch_lengths);
+    //auto model_data = model.initialize_data(data.max_alphabet_size + 2, t.branch_lengths);
 
     phylogeny phylo = phylogeny<laml_data>(
         data.character_matrix.size(), 
@@ -406,6 +406,8 @@ int main(int argc, char ** argv) {
     int num_iters = 100;
     double llh;
     for (int i = 0; i < num_iters - 1; i++) {
+        std::vector<double> internal_comp_buffer(data.max_alphabet_size + 2);
+        auto model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
         llh = phylo.compute_inside_log_likelihood(model, inside_ll, model_data);
     }
 

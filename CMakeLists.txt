@@ -9,7 +9,7 @@ endif()
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -pg --coverage")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -funsafe-math-optimizations -march=native")
 
 project(fastlaml VERSION 1.0)
 add_subdirectory(src/)
