@@ -31,6 +31,7 @@ class likelihood_buffer {
     }
 };
 
+template <typename D>
 class phylogeny {
 public:
     public:
@@ -40,7 +41,7 @@ public:
     size_t root_id;   
     digraph<size_t> tree;
     std::vector<double> branch_lengths;
-    std::unique_ptr<phylogenetic_model> model;
+    std::unique_ptr<phylogenetic_model<D>> model;
     
     phylogeny(
         size_t num_leaves,
@@ -48,7 +49,7 @@ public:
         size_t root_id,
         const digraph<size_t>& tree,
         const std::vector<double>& branch_lengths,
-        std::unique_ptr<phylogenetic_model> model
+        std::unique_ptr<phylogenetic_model<D>> model
     ) : 
         num_leaves(num_leaves),
         num_nodes(num_nodes),
@@ -58,7 +59,75 @@ public:
         model(std::move(model))
     {}
 
-    double compute_inside_log_likelihood(likelihood_buffer& b); 
+    double compute_inside_log_likelihood(likelihood_buffer& b, std::vector<D> &node_data); 
 };
 
+template <typename D>
+static void compute_inside_for_character(
+    std::vector<D> &node_data,
+    const std::vector<int> &post_order, 
+    const phylogeny<D> &p,
+    likelihood_buffer &b, 
+    size_t character
+) {
+    size_t alphabet_size = p.model->alphabet_sizes[character];
+    std::vector<double> tmp_buffer_1(alphabet_size, 0.0);
+    std::vector<double> tmp_buffer_2(alphabet_size, 0.0);
+
+    for (auto node_id : post_order) {
+        size_t node = p.tree[node_id].data;
+
+        if (p.tree.out_degree(node_id) == 0) {
+            p.model->compute_taxa_log_inside_likelihood(node_data[node], character, node, tmp_buffer_1);
+            for (size_t j = 0; j < alphabet_size; j++) {
+                b(character, node, j) = tmp_buffer_1[j];
+            }
+
+            continue;
+        }
+
+        for (size_t j = 0; j < alphabet_size; j++) {
+            b(character, node, j) = 0.0;
+        }
+
+        for (auto u_id : p.tree.successors(node_id)) {
+            size_t u = p.tree[u_id].data;
+            double blen = p.branch_lengths[u];
+
+            for (size_t j = 0; j < alphabet_size; j++) {
+                tmp_buffer_2[j] = b(character, u, j);
+            }
+
+            p.model->compute_log_pmatrix_vector_product(node_data[u], character, blen, tmp_buffer_2, tmp_buffer_1);
+            for (size_t j = 0; j < alphabet_size; j++) {
+                b(character, node, j) += tmp_buffer_1[j];
+            } 
+        }
+    }
+}
+
+template <typename D>
+double phylogeny<D>::compute_inside_log_likelihood(likelihood_buffer& b, std::vector<D> &node_data) {
+    std::vector<int> post_order = this->tree.postorder_traversal(this->root_id);
+
+    size_t num_characters = model->alphabet_sizes.size();
+    for (size_t c = 0; c < num_characters; ++c) {
+        compute_inside_for_character(node_data, post_order, *this, b, c);
+    }
+
+    size_t root = this->tree[this->root_id].data;
+    double llh = 0.0;
+    for (size_t c = 0; c < num_characters; ++c) {
+        std::vector<double> root_llh(this->model->alphabet_sizes[c]);
+        std::vector<double> buff(this->model->alphabet_sizes[c]);
+
+        for (size_t j = 0; j < this->model->alphabet_sizes[c]; j++) {
+            root_llh[j] = b(c, root, j);
+        }
+        this->model->compute_log_pmatrix_vector_product(node_data[root], c, this->branch_lengths[root], root_llh, buff);
+        llh += buff[1];
+    }
+
+    return llh;
+}
 #endif

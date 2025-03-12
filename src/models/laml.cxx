@@ -31,16 +31,17 @@ log_sum_exp(Iter begin, Iter end)
 }
 
 void laml_model::compute_log_pmatrix_vector_product(
+    laml_data& d,
     size_t character, 
     double branch_length, 
     const std::vector<double>& log_vector,
     std::vector<double>& result
-) {
+) const {
     size_t alphabet_size = this->alphabet_sizes[character];
     double nu = this->parameters[0];
 
     // Copy log_vector into tmp_buffer for calculations
-    std::vector<double>& tmp = this->tmp_buffer;
+    std::vector<double>& tmp = d.buffer;
     std::copy(log_vector.begin(), log_vector.begin() + alphabet_size, tmp.begin());
     
     /* Handle i = 0 which is state = ? case */
@@ -53,7 +54,7 @@ void laml_model::compute_log_pmatrix_vector_product(
         tmp[j] += this->log_mutation_priors[character][j - 2]
                  - branch_length * nu + std::log(1 - std::exp(-branch_length));
     }
-    result[1] = log_sum_exp(this->tmp_buffer.begin(), this->tmp_buffer.begin() + alphabet_size);
+    result[1] = log_sum_exp(tmp.begin(), tmp.begin() + alphabet_size);
 
     /* Handle remaining i \notin {0, 1}, non-missing cases */
     double tmp2[] = {0.0, 0.0};
@@ -65,18 +66,20 @@ void laml_model::compute_log_pmatrix_vector_product(
 }
 
 void laml_model::compute_log_pmatrix_transpose_vector_product(
+    laml_data& d,
     size_t character, 
     double branch_length, 
     const std::vector<double>& log_vector,
     std::vector<double>& result
-) {
+) const {
 }
 
 void laml_model::compute_taxa_log_inside_likelihood(
+    laml_data& d,
     size_t character, 
     size_t taxa_id,
     std::vector<double>& result
-) {
+) const {
     double phi = this->parameters[1];
     int state = this->character_matrix[taxa_id][character];
     
@@ -93,7 +96,7 @@ void laml_model::compute_taxa_log_inside_likelihood(
     }
 };
 
-void laml_model::compute_root_distribution(size_t character, std::vector<double>& result) {
+void laml_model::compute_root_distribution(laml_data& d, size_t character, std::vector<double>& result) const {
     std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
     result[1] = 0.0; // root must start at unmutated state
 };

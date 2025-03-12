@@ -4,15 +4,27 @@
 #include "../digraph.h"
 #include "../phylogenetic_model.h"
 
+/* 
+ * Precomputed values and buffers for the LAML model.
+ */
+struct laml_data {
+    std::vector<double> buffer;
+    double log_phi;
+    double log_one_minus_phi;
+    double v1;
+    double v2;
+    double v3;
+
+    laml_data(std::vector<double> buffer, double log_phi, double log_one_minus_phi, double v1, double v2, double v3) 
+        : buffer(buffer), log_phi(log_phi), log_one_minus_phi(log_one_minus_phi), v1(v1), v2(v2), v3(v3) {}
+};
+
 /*
 * In the LAML model, we order the alphabet as {-1, 0, 1, 2, ...} where -1 is 
 * the missing data state, 0 is the unmutated state, and the remaining states
 * are the mutated states.
 */
-class laml_model : public phylogenetic_model {
-    private:
-    std::vector<double> tmp_buffer; // tmp LSE array
-
+class laml_model : public phylogenetic_model<laml_data> {
     public:
     digraph<size_t> tree;
     std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
@@ -28,7 +40,6 @@ class laml_model : public phylogenetic_model {
     ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
         parameters = {nu, phi}; // nu, phi
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
-        size_t max_alphabet_size = 0;
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
             int alphabet_size = 0;
             for (size_t j = 0; j < character_matrix.size(); j++) {
@@ -36,7 +47,6 @@ class laml_model : public phylogenetic_model {
             }
 
             alphabet_sizes[i] = alphabet_size + 2;
-            max_alphabet_size = std::max(max_alphabet_size, alphabet_sizes[i]);
         }
 
         log_mutation_priors = std::vector<std::vector<double>>(mutation_priors.size());
@@ -46,14 +56,24 @@ class laml_model : public phylogenetic_model {
                 log_mutation_priors[i][j] = std::log(mutation_priors[i][j]);
             }
         }
-
-        tmp_buffer = std::vector<double>(max_alphabet_size, 0.0);
     }
 
-    void compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) override;
-    void compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) override;
-    void compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id, std::vector<double>& result) override;
-    void compute_root_distribution(size_t character, std::vector<double>& result) override;
+    void compute_log_pmatrix_vector_product(laml_data& d, size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
+    void compute_log_pmatrix_transpose_vector_product(laml_data& d, size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
+    void compute_taxa_log_inside_likelihood(laml_data& d, size_t character, size_t taxa_id, std::vector<double>& result) const override;
+    void compute_root_distribution(laml_data& d, size_t character, std::vector<double>& result) const override;
+
+    // std::vector<laml_data> initialize_data(std::vector<double> &buffer) const {
+    //     return std::vector<laml_data>(tree.size(), {buffer, 0.0, 0.0, 0.0, 0.0, 0.0});
+    // }
+    std::vector<laml_data> initialize_data(size_t buffer_size) const {
+        std::vector<laml_data> result;
+        result.reserve(tree.size());
+        for (size_t i = 0; i < tree.size(); ++i) {
+            result.push_back({std::vector<double>(buffer_size), 0.0, 0.0, 0.0, 0.0, 0.0});
+        }
+        return result;
+    }
 };
 
 #endif

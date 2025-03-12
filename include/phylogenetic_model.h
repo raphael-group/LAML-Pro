@@ -3,6 +3,7 @@
 
 #include <vector>
 
+template <typename D>
 class phylogenetic_model {
 public:
     std::vector<size_t> alphabet_sizes; /* The size of this is the number of characters */
@@ -16,17 +17,19 @@ public:
      *        log(P^{c}v) where P^{c} is the probability transition matrix for 
      *        character c with branch length b.
      * 
+     * @param data An arbitrary, model specific data object
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
      * @return Result vector of the log-product of size alphabet_sizes[character]
      */
     virtual void compute_log_pmatrix_vector_product(
+        D& data,
         size_t character, 
         double branch_length, 
         const std::vector<double>& log_vector,
         std::vector<double>& result
-    ) = 0;
+    ) const = 0;
 
     /*!
      * @brief Computes the product of the transpose probability matrix 
@@ -34,39 +37,47 @@ public:
      *        this computes log(v^TP^{c}) where P^{c} is the probability transition
      *        matrix for character c with branch length b.
      * 
+     * @param data An arbitrary, model specific data object
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
      * @return Result vector of the log-product of size alphabet_sizes[character]
      */
     virtual void compute_log_pmatrix_transpose_vector_product(
+        D& data,
         size_t character,
         double branch_length,
         const std::vector<double>& log_vector,
         std::vector<double>& result
-    ) = 0;
+    ) const = 0;
 
     /*!
      * Computes the log likelihood for a specific taxa and character.
+     * 
+     * @param data An arbitrary, model specific data object
      * @param character The character index
      * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
      * @return Vector of log likelihoods for each state of size alphabet_sizes[character]
      */
     virtual void compute_taxa_log_inside_likelihood(
+        D& data,
         size_t character, 
         size_t taxa_id,
         std::vector<double>& result
-    ) = 0;
+    ) const = 0;
 
     /*!
      * Computes the root distribution for a specific character.
+     *
+     * @param data An arbitrary, model specific data object
      * @param character The character index
      * @return Vector containing the root distribution of size alphabet_sizes[character]
      */
     virtual void compute_root_distribution(
+        D& data,
         size_t character,
         std::vector<double>& result
-    ) = 0;
+    ) const = 0;
 };
 
 #endif // PHYLOGENETIC_MODEL_H

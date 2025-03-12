@@ -1,4 +1,4 @@
-add_executable(fastlaml fastlaml.cxx phylogeny.cxx models/laml.cxx)
+add_executable(fastlaml fastlaml.cxx models/laml.cxx)
 
 # add libraries
 target_link_libraries(fastlaml PRIVATE nlohmann_json::nlohmann_json)
