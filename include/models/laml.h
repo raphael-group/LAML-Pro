@@ -30,7 +30,7 @@ class laml_model : public phylogenetic_model<laml_data> {
     digraph<size_t> tree;
     std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
     std::vector<std::vector<double>> mutation_priors; // [character][state]
-    std::vector<std::vector<double>> log_mutation_priors; // [character][state]
+    std::vector<std::vector<double>> log_mutation_priors; // [character][state]    
 
     laml_model(
         const digraph<size_t>& tree,

@@ -1,6 +1,7 @@
 #include <vector>
 #include <limits>
 #include "models/laml.h"
+#include "math_utilities.h"
 
 #include <iterator>
 #include <algorithm>
@@ -8,27 +9,6 @@
 #include <cmath>
 
 #define NEGATIVE_INFINITY (-1e7) //-std::numeric_limits<double>::infinity())
-
-double underflow_exp(double x) {
-    if (x <= -100) return 0.0;
-    return std::exp(x);
-}
-
-template <typename Iter>
-typename std::iterator_traits<Iter>::value_type
-log_sum_exp(Iter begin, Iter end)
-{
-    using VT = typename std::iterator_traits<Iter>::value_type;
-    if (begin == end) return VT{};
-
-    auto max_elem = *std::max_element(begin, end);
-    VT sum = VT{0};
-    for (auto it = begin; it != end; ++it) {
-        sum += underflow_exp(*it - max_elem);
-    }
-
-    return max_elem + std::log(sum);
-}
 
 void laml_model::compute_log_pmatrix_vector_product(
     laml_data& d,

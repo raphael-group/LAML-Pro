@@ -389,7 +389,6 @@ int main(int argc, char ** argv) {
     );
     
     laml_model model(t.tree, data.character_matrix, data.mutation_priors, 0.5, 0.5);
-    //auto model_data = model.initialize_data(data.max_alphabet_size + 2, t.branch_lengths);
 
     phylogeny phylo = phylogeny<laml_data>(
         data.character_matrix.size(), 
