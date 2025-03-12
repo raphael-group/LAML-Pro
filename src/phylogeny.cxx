@@ -7,6 +7,7 @@ static void compute_inside_for_character(size_t character, likelihood_buffer &b,
     std::vector<int> post_order = p.tree.postorder_traversal(p.root_id);
     for (auto node_id : post_order) {
         size_t node = p.tree[node_id].data;
+
         if (p.tree.out_degree(node_id) == 0) {
             std::vector<double> ll = p.model->compute_taxa_log_inside_likelihood(character, node);
             for (size_t j = 0; j < alphabet_size; j++) {

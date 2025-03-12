@@ -393,7 +393,7 @@ int main(int argc, char ** argv) {
     );
     
     std::unique_ptr<phylogenetic_model> model = std::make_unique<laml_model>(
-        t.tree, data.character_matrix, data.mutation_priors
+        t.tree, data.character_matrix, data.mutation_priors, 0.5, 0.5
     );
 
     phylogeny phylo = phylogeny(
@@ -405,8 +405,25 @@ int main(int argc, char ** argv) {
         std::move(model)
     );
 
-    likelihood_buffer buffer(data.num_characters, data.max_alphabet_size, t.num_nodes);
-    phylo.compute_inside_log_likelihood(buffer);
+    likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
+    phylo.compute_inside_log_likelihood(inside_ll);
+
+    // Print likelihood buffer for debugging
+    std::cout << "Likelihood Buffer Values:\n";
+    std::cout << "Format: Node ID, Character ID: [values for each state]\n";
+    
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        for (size_t char_id = 0; char_id < data.num_characters; ++char_id) {
+            std::cout << "Node " << t.tree[node_id].data << ", Character " << char_id << ": [";
+            for (size_t state = 0; state < data.max_alphabet_size + 2; ++state) {
+                std::cout << inside_ll(char_id, node_id, state);
+                if (state < data.max_alphabet_size + 1) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << "]\n";
+        }
+    }
 
     return 0;
 }

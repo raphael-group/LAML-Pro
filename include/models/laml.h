@@ -13,9 +13,11 @@ class laml_model : public phylogenetic_model {
     laml_model(
         const digraph<size_t>& tree,
         const std::vector<std::vector<int>>& character_matrix,
-        const std::vector<std::vector<double>>& mutation_priors
+        const std::vector<std::vector<double>>& mutation_priors,
+        double nu,
+        double phi
     ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
-        parameters = std::vector<double>(2, 0.5);
+        parameters = {nu, phi};
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
             int alphabet_size = 0;
