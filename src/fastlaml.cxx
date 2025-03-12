@@ -404,9 +404,14 @@ int main(int argc, char ** argv) {
     likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
 
     auto start = std::chrono::high_resolution_clock::now();
-    double llh = phylo.compute_inside_log_likelihood(inside_ll);
+    int num_iters = 100;
+    double llh;
+    for (int i = 0; i < num_iters - 1; i++) {
+        llh = phylo.compute_inside_log_likelihood(inside_ll);
+    }
+
     auto end = std::chrono::high_resolution_clock::now();
-    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / ((double) num_iters);
 
     spdlog::info("Log likelihood: {}", llh);
     spdlog::info("Computation time: {} ms", runtime);

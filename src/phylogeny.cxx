@@ -9,15 +9,16 @@ static void compute_inside_for_character(
 ) {
     // TODO: fix excessive (ideally, all) copying of memory.
     size_t alphabet_size = p.model->alphabet_sizes[character];
-    std::vector<double> tmp_buffer(alphabet_size, 0.0);
+    std::vector<double> tmp_buffer_1(alphabet_size, 0.0);
+    std::vector<double> tmp_buffer_2(alphabet_size, 0.0);
 
     for (auto node_id : post_order) {
         size_t node = p.tree[node_id].data;
 
         if (p.tree.out_degree(node_id) == 0) {
-            p.model->compute_taxa_log_inside_likelihood(character, node, tmp_buffer);
+            p.model->compute_taxa_log_inside_likelihood(character, node, tmp_buffer_1);
             for (size_t j = 0; j < alphabet_size; j++) {
-                b(character, node, j) = tmp_buffer[j];
+                b(character, node, j) = tmp_buffer_1[j];
             }
 
             continue;
@@ -31,14 +32,13 @@ static void compute_inside_for_character(
             size_t u = p.tree[u_id].data;
             double blen = p.branch_lengths[u];
 
-            std::vector u_ll(alphabet_size, 0.0);
             for (size_t j = 0; j < alphabet_size; j++) {
-                u_ll[j] = b(character, u, j);
+                tmp_buffer_2[j] = b(character, u, j);
             }
 
-            p.model->compute_log_pmatrix_vector_product(character, blen, u_ll, tmp_buffer);
+            p.model->compute_log_pmatrix_vector_product(character, blen, tmp_buffer_2, tmp_buffer_1);
             for (size_t j = 0; j < alphabet_size; j++) {
-                b(character, node, j) += tmp_buffer[j];
+                b(character, node, j) += tmp_buffer_1[j];
             } 
         }
     }

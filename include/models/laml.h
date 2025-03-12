@@ -10,6 +10,9 @@
 * are the mutated states.
 */
 class laml_model : public phylogenetic_model {
+    private:
+    std::vector<double> tmp_buffer; // tmp LSE array
+
     public:
     digraph<size_t> tree;
     std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
@@ -25,6 +28,7 @@ class laml_model : public phylogenetic_model {
     ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
         parameters = {nu, phi}; // nu, phi
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
+        size_t max_alphabet_size = 0;
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
             int alphabet_size = 0;
             for (size_t j = 0; j < character_matrix.size(); j++) {
@@ -32,6 +36,7 @@ class laml_model : public phylogenetic_model {
             }
 
             alphabet_sizes[i] = alphabet_size + 2;
+            max_alphabet_size = std::max(max_alphabet_size, alphabet_sizes[i]);
         }
 
         log_mutation_priors = std::vector<std::vector<double>>(mutation_priors.size());
@@ -41,12 +46,14 @@ class laml_model : public phylogenetic_model {
                 log_mutation_priors[i][j] = std::log(mutation_priors[i][j]);
             }
         }
+
+        tmp_buffer = std::vector<double>(max_alphabet_size, 0.0);
     }
 
-    void compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
-    void compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) const override;
-    void compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id, std::vector<double>& result) const override;
-    void compute_root_distribution(size_t character, std::vector<double>& result) const override;
+    void compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) override;
+    void compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector, std::vector<double>& result) override;
+    void compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id, std::vector<double>& result) override;
+    void compute_root_distribution(size_t character, std::vector<double>& result) override;
 };
 
 #endif

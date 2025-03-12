@@ -26,7 +26,7 @@ public:
         double branch_length, 
         const std::vector<double>& log_vector,
         std::vector<double>& result
-    ) const = 0;
+    ) = 0;
 
     /*!
      * @brief Computes the product of the transpose probability matrix 
@@ -44,7 +44,7 @@ public:
         double branch_length,
         const std::vector<double>& log_vector,
         std::vector<double>& result
-    ) const = 0;
+    ) = 0;
 
     /*!
      * Computes the log likelihood for a specific taxa and character.
@@ -56,7 +56,7 @@ public:
         size_t character, 
         size_t taxa_id,
         std::vector<double>& result
-    ) const = 0;
+    ) = 0;
 
     /*!
      * Computes the root distribution for a specific character.
@@ -66,7 +66,7 @@ public:
     virtual void compute_root_distribution(
         size_t character,
         std::vector<double>& result
-    ) const = 0;
+    ) = 0;
 };
 
 #endif // PHYLOGENETIC_MODEL_H
