@@ -388,29 +388,25 @@ int main(int argc, char ** argv) {
         program.get<std::string>("--mutation-priors")
     );
     
-    std::unique_ptr<laml_model> model = std::make_unique<laml_model>(
-        t.tree, data.character_matrix, data.mutation_priors, 0.5, 0.5
-    );
+    laml_model model(t.tree, data.character_matrix, data.mutation_priors, 0.5, 0.5);
+    auto model_data = model.initialize_data(data.max_alphabet_size + 2, t.branch_lengths);
 
     phylogeny phylo = phylogeny<laml_data>(
         data.character_matrix.size(), 
         t.num_nodes, 
         t.root_id, 
         t.tree, 
-        t.branch_lengths, 
-        std::move(model)
+        t.branch_lengths
     );
 
     likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
 
     auto start = std::chrono::high_resolution_clock::now();
+
     int num_iters = 100;
     double llh;
     for (int i = 0; i < num_iters - 1; i++) {
-        std::cout << "HERE1" << std::endl;
-        auto laml_data = model->initialize_data(data.max_alphabet_size + 2);
-        std::cout << "HERE2" << std::endl;
-        llh = phylo.compute_inside_log_likelihood(inside_ll, laml_data);
+        llh = phylo.compute_inside_log_likelihood(model, inside_ll, model_data);
     }
 
     auto end = std::chrono::high_resolution_clock::now();

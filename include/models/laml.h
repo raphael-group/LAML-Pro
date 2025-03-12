@@ -13,10 +13,11 @@ struct laml_data {
     double log_one_minus_phi;
     double v1;
     double v2;
-    double v3;
 
-    laml_data(std::vector<double> buffer, double log_phi, double log_one_minus_phi, double v1, double v2, double v3) 
-        : buffer(buffer), log_phi(log_phi), log_one_minus_phi(log_one_minus_phi), v1(v1), v2(v2), v3(v3) {}
+    laml_data(std::vector<double> buffer, double log_phi, double log_one_minus_phi, double v1, double v2) 
+        : buffer(buffer), log_phi(log_phi), log_one_minus_phi(log_one_minus_phi), v1(v1), v2(v2) {}
+
+    laml_data() {}
 };
 
 /*
@@ -63,15 +64,20 @@ class laml_model : public phylogenetic_model<laml_data> {
     void compute_taxa_log_inside_likelihood(laml_data& d, size_t character, size_t taxa_id, std::vector<double>& result) const override;
     void compute_root_distribution(laml_data& d, size_t character, std::vector<double>& result) const override;
 
-    // std::vector<laml_data> initialize_data(std::vector<double> &buffer) const {
-    //     return std::vector<laml_data>(tree.size(), {buffer, 0.0, 0.0, 0.0, 0.0, 0.0});
-    // }
-    std::vector<laml_data> initialize_data(size_t buffer_size) const {
-        std::vector<laml_data> result;
-        result.reserve(tree.size());
+    std::vector<laml_data> initialize_data(size_t buffer_size, const std::vector<double>& branch_lengths) const {
+        std::vector<laml_data> result(tree.size());
+
         for (size_t i = 0; i < tree.size(); ++i) {
-            result.push_back({std::vector<double>(buffer_size), 0.0, 0.0, 0.0, 0.0, 0.0});
+            int node = tree[i].data;
+            result[node] = laml_data(
+                std::vector<double>(buffer_size, 0.0),
+                std::log(parameters[1]),
+                std::log(1 - parameters[1]),
+                std::log(1 - std::exp(-branch_lengths[node])),
+                std::log(1 - std::exp(-parameters[0] * branch_lengths[node]))
+            );
         }
+
         return result;
     }
 };
