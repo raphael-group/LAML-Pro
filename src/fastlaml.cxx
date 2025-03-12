@@ -8,9 +8,14 @@
 #include <algorithm>
 #include <unordered_map>
 #include <stdexcept>
+
 #include "csv.hpp"
 #include "digraph.h"
 #include "compact_tree.h"
+
+#include "phylogenetic_model.h"
+#include "phylogeny.h"
+#include "models/laml.h"
 
 #include <argparse/argparse.hpp>
 #include <spdlog/spdlog.h>
@@ -379,57 +384,29 @@ int main(int argc, char ** argv) {
 
     spdlog::info("Parsing Newick tree file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
-    spdlog::info("Tree Summary:");
-    spdlog::info("  Number of leaves: {}", t.num_leaves);
-    spdlog::info("  Total number of nodes: {}", t.num_nodes);
-    spdlog::info("  Root: {}", t.tree[t.root_id].data);
 
-    spdlog::info("Node details:");
-    for (size_t i = 0; i < t.num_nodes; i++) {
-        int j = t.tree[i].data;
-        std::ostringstream children;
-        for (auto child : t.tree.successors(i)) {
-            children << t.tree[child].data << " ";
-        }
-        
-        spdlog::info("  Node {}: name='{}', branch_length={}, children=[{}]", 
-                    j, 
-                    t.node_names[j].empty() ? "<unnamed>" : t.node_names[j], 
-                    t.branch_lengths[j],
-                    children.str());
-    }
-
+    spdlog::info("Processing character matrix and mutation priors...");
     phylogeny_data data = process_phylogeny_data(
         t, 
         program.get<std::string>("--character-matrix"),
         program.get<std::string>("--mutation-priors")
     );
     
-    spdlog::info("Processed phylogeny data:");
-    spdlog::info("  Number of characters: {}", data.num_characters);
-    spdlog::info("  Max alphabet size: {}", data.max_alphabet_size);
-    
-    if (data.character_matrix.size() > 0) {
-        spdlog::info("First few entries of the recoded character matrix:");
-        for (size_t i = 0; i < std::min(data.character_matrix.size(), size_t(5)); ++i) {
-            std::ostringstream row;
-            for (size_t j = 0; j < std::min(data.character_matrix[i].size(), size_t(10)); ++j) {
-                row << data.character_matrix[i][j] << " ";
-            }
-            spdlog::info("  Leaf {}: [{}]", t.node_names[i], row.str());
-        }
-    }
-    
-    if (data.mutation_priors.size() > 0) {
-        spdlog::info("First few entries of the recoded mutation priors:");
-        for (size_t c = 0; c < std::min(data.mutation_priors.size(), size_t(5)); ++c) {
-            std::ostringstream row;
-            for (size_t s = 0; s < std::min(data.mutation_priors[c].size(), size_t(5)); ++s) {
-                row << data.mutation_priors[c][s] << " ";
-            }
-            spdlog::info("  Character {}: [{}]", c, row.str());
-        }
-    }
+    std::unique_ptr<phylogenetic_model> model = std::make_unique<laml_model>(
+        t.tree, data.character_matrix, data.mutation_priors
+    );
+
+    phylogeny phylo = phylogeny(
+        data.character_matrix.size(), 
+        t.num_nodes, 
+        t.root_id, 
+        t.tree, 
+        t.branch_lengths, 
+        std::move(model)
+    );
+
+    likelihood_buffer buffer(data.num_characters, data.max_alphabet_size, t.num_nodes);
+    phylo.compute_inside_log_likelihood(buffer);
 
     return 0;
 }

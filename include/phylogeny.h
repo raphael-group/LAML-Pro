@@ -14,11 +14,11 @@ class likelihood_buffer {
     size_t num_nodes;
 
     public:
-    likelihood_buffer(size_t num_characters, size_t max_alphabet_size, size_t num_nodes)
+    likelihood_buffer(size_t num_characters, size_t max_alphabet_size, size_t num_nodes, double fill_value = -1e9)
         : num_characters(num_characters),
           max_alphabet_size(max_alphabet_size),
           num_nodes(num_nodes) {
-        buffer.resize(num_characters * num_nodes * max_alphabet_size, -1e9);
+        buffer.resize(num_characters * num_nodes * max_alphabet_size, fill_value);
     }
 
     double& operator()(size_t character, size_t node, size_t symbol) {

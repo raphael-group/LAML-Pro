@@ -5,8 +5,7 @@
 
 class phylogenetic_model {
 public:
-    int num_taxa;
-    std::vector<int> alphabet_sizes; /* The size of this is the number of characters */
+    std::vector<size_t> alphabet_sizes; /* The size of this is the number of characters */
     std::vector<double> parameters;  /* The set of non-branch length parameters for the model */
 
     virtual ~phylogenetic_model() = default;
@@ -20,10 +19,10 @@ public:
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
-     * @return Result vector of the product
+     * @return Result vector of the log-product of size alphabet_sizes[character]
      */
     virtual std::vector<double> compute_log_pmatrix_vector_product(
-        int character, 
+        size_t character, 
         double branch_length, 
         const std::vector<double>& log_vector
     ) const = 0;
@@ -37,10 +36,10 @@ public:
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
-     * @return Result vector of the product
+     * @return Result vector of the log-product of size alphabet_sizes[character]
      */
     virtual std::vector<double> compute_log_pmatrix_transpose_vector_product(
-        int character,
+        size_t character,
         double branch_length,
         const std::vector<double>& log_vector
     ) const = 0;
@@ -49,20 +48,20 @@ public:
      * Computes the log likelihood for a specific taxa and character.
      * @param character The character index
      * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
-     * @return Vector of log likelihoods for each state
+     * @return Vector of log likelihoods for each state of size alphabet_sizes[character]
      */
     virtual std::vector<double> compute_taxa_log_inside_likelihood(
-        int character, 
-        int taxa_id
+        size_t character, 
+        size_t taxa_id
     ) const = 0;
 
     /*!
      * Computes the root distribution for a specific character.
      * @param character The character index
-     * @return Vector containing the root distribution
+     * @return Vector containing the root distribution of size alphabet_sizes[character]
      */
     virtual std::vector<double> compute_root_distribution(
-        int character
+        size_t character
     ) const = 0;
 };
 

@@ -1,9 +1,36 @@
 #ifndef LAML_MODEL_H
 #define LAML_MODEL_H
 
+#include "../digraph.h"
 #include "../phylogenetic_model.h"
 
 class laml_model : public phylogenetic_model {
+    public:
+    digraph<size_t> tree;
+    std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
+    std::vector<std::vector<double>> mutation_priors; // [character][state]
+
+    laml_model(
+        const digraph<size_t>& tree,
+        const std::vector<std::vector<int>>& character_matrix,
+        const std::vector<std::vector<double>>& mutation_priors
+    ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
+        parameters = std::vector<double>(2, 0.5);
+        alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
+        for (size_t i = 0; i < alphabet_sizes.size(); i++) {
+            int alphabet_size = 0;
+            for (size_t j = 0; j < character_matrix.size(); j++) {
+                alphabet_size = std::max(alphabet_size, character_matrix[j][i]);
+            }
+
+            alphabet_sizes[i] = alphabet_size + 2;
+        }
+    }
+
+    std::vector<double> compute_log_pmatrix_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector) const override;
+    std::vector<double> compute_log_pmatrix_transpose_vector_product(size_t character, double branch_length, const std::vector<double>& log_vector) const override;
+    std::vector<double> compute_taxa_log_inside_likelihood(size_t character, size_t taxa_id) const override;
+    std::vector<double> compute_root_distribution(size_t character) const override;
 };
 
 #endif

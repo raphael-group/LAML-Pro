@@ -6,16 +6,16 @@ static void compute_inside_for_character(size_t character, likelihood_buffer &b,
     size_t alphabet_size = static_cast<size_t>(p.model->alphabet_sizes[character]);
     std::vector<int> post_order = p.tree.postorder_traversal(p.root_id);
     for (auto node_id : post_order) {
-        size_t node = p.tree[node].data;
+        size_t node = p.tree[node_id].data;
         if (p.tree.out_degree(node_id) == 0) {
             std::vector<double> ll = p.model->compute_taxa_log_inside_likelihood(character, node);
-            for (int j = 0; j < alphabet_size; j++) {
+            for (size_t j = 0; j < alphabet_size; j++) {
                 b(character, node, j) = ll[j];
             }
             continue;
         }
 
-        for (int j = 0; j < alphabet_size; j++) {
+        for (size_t j = 0; j < alphabet_size; j++) {
             b(character, node, j) = 0.0;
         }
 
@@ -24,12 +24,12 @@ static void compute_inside_for_character(size_t character, likelihood_buffer &b,
             double blen = p.branch_lengths[u];
 
             std::vector u_ll(alphabet_size, 0.0);
-            for (int j = 0; j < alphabet_size; j++) {
+            for (size_t j = 0; j < alphabet_size; j++) {
                 u_ll[j] = b(character, u, j);
             }
 
             auto res = p.model->compute_log_pmatrix_vector_product(character, blen, u_ll);
-            for (int j = 0; j < alphabet_size; j++) {
+            for (size_t j = 0; j < alphabet_size; j++) {
                 b(character, node, j) += res[j];
             } 
         }

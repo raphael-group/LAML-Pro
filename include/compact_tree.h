@@ -289,10 +289,17 @@ class compact_tree {
          * Pre-order traversal iterator. The only guarantee is that a node will be visited before its children.
          * Currently, nodes will be visited in the order they appear in the original Newick string.
          */
-        class preorder_iterator : public std::iterator<std::input_iterator_tag, CT_NODE_T> {
+        class preorder_iterator {
             private:
                 CT_NODE_T node;
             public:
+                // Iterator traits definitions to replace std::iterator
+                using iterator_category = std::input_iterator_tag;
+                using value_type = CT_NODE_T;
+                using difference_type = std::ptrdiff_t;
+                using pointer = CT_NODE_T*;
+                using reference = CT_NODE_T&;
+                
                 preorder_iterator(CT_NODE_T x) : node(x) {}
                 preorder_iterator(const preorder_iterator & it) : node(it.node) {}
                 preorder_iterator & operator=(const preorder_iterator & it) { node = it.node; return *this; }
@@ -319,10 +326,17 @@ class compact_tree {
          * Postorder traversal iterator. The only guarantee is that a node will be visited before its parent.
          * Currently, nodes will be visited in reverse of the order they appear in the original Newick string.
          */
-        class postorder_iterator : public std::iterator<std::input_iterator_tag, CT_NODE_T> {
+        class postorder_iterator {
             private:
                 CT_NODE_T node;
             public:
+                // Iterator traits definitions to replace std::iterator
+                using iterator_category = std::input_iterator_tag;
+                using value_type = CT_NODE_T;
+                using difference_type = std::ptrdiff_t;
+                using pointer = CT_NODE_T*;
+                using reference = CT_NODE_T&;
+                
                 postorder_iterator(CT_NODE_T x) : node(x) {}
                 postorder_iterator(const postorder_iterator & it) : node(it.node) {}
                 postorder_iterator & operator=(const postorder_iterator & it) { node = it.node; return *this; }
@@ -349,10 +363,17 @@ class compact_tree {
          * Currently, nodes with the same depth will be visited in the order they appear in the original Newick string.
          * Note that the copy constructor and the post-increment `it++` operator will copy the BFS queue, which is slow and uses extra memory, so avoid both when possible.
          */
-        class levelorder_iterator : public std::iterator<std::input_iterator_tag, CT_NODE_T> {
+        class levelorder_iterator {
             private:
                 std::queue<CT_NODE_T> q; compact_tree* tree_ptr;
             public:
+                // Iterator traits definitions to replace std::iterator
+                using iterator_category = std::input_iterator_tag;
+                using value_type = CT_NODE_T;
+                using difference_type = std::ptrdiff_t;
+                using pointer = CT_NODE_T*;
+                using reference = CT_NODE_T&;
+                
                 levelorder_iterator(compact_tree* const tp) : tree_ptr(tp) {}
                 levelorder_iterator(const CT_NODE_T root, compact_tree* const tp) : tree_ptr(tp) { q.push(root); }
                 levelorder_iterator(std::queue<CT_NODE_T> x, compact_tree* const tp) : q(x), tree_ptr(tp) {}
@@ -381,10 +402,17 @@ class compact_tree {
          * Iterate over the leaves of this tree.
          * Currently, leaves will be visited in the order they appear in the original Newick string.
          */
-        class leaves_iterator : public std::iterator<std::input_iterator_tag, CT_NODE_T> {
+        class leaves_iterator {
             private:
                 CT_NODE_T node; const compact_tree* tree_ptr;
             public:
+                // Iterator traits definitions to replace std::iterator
+                using iterator_category = std::input_iterator_tag;
+                using value_type = CT_NODE_T;
+                using difference_type = std::ptrdiff_t;
+                using pointer = CT_NODE_T*;
+                using reference = CT_NODE_T&;
+                
                 leaves_iterator(CT_NODE_T x, const compact_tree* const tp) : node(x), tree_ptr(tp) {}
                 leaves_iterator(const leaves_iterator & it) : node(it.node), tree_ptr(it.tree_ptr) {}
                 leaves_iterator & operator=(const leaves_iterator & it) { node = it.node; tree_ptr = it.tree_ptr; return *this; }
@@ -411,10 +439,17 @@ class compact_tree {
          * Iterate over the children of a given node.
          * Currently, children will be visited in the order they appear in the original Newick string.
          */
-        class children_iterator : public std::iterator<std::input_iterator_tag, CT_NODE_T> {
+        class children_iterator {
             private:
                 std::vector<CT_NODE_T>::iterator it;
             public:
+                // Iterator traits definitions to replace std::iterator
+                using iterator_category = std::input_iterator_tag;
+                using value_type = CT_NODE_T;
+                using difference_type = std::ptrdiff_t;
+                using pointer = CT_NODE_T*;
+                using reference = CT_NODE_T&;
+                
                 children_iterator(std::vector<CT_NODE_T>::iterator x) : it(x) {}
                 children_iterator(const children_iterator & o) : it(o.it) {}
                 children_iterator & operator=(const children_iterator & o) { it = o.it; return *this; }
