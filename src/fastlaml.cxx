@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <stdexcept>
+#include "csv.hpp"
 #include "digraph.h"
 #include "compact_tree.h"
 
@@ -45,7 +46,6 @@ struct phylogeny_data {
     size_t max_alphabet_size;
     std::vector<std::vector<int>> character_matrix; // [leaf_id][character]
     std::vector<std::vector<double>> mutation_priors; // [character][state]
-    std::vector<std::string> character_names;
 };
 
 /*!
@@ -99,39 +99,36 @@ tree parse_newick_tree(std::string fname) {
  * @return Pair of (taxa_names, matrix) where matrix[i][j] is the state for taxon i, character j
  */
 std::pair<std::vector<std::string>, std::vector<std::vector<int>>> parse_character_matrix(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open character matrix file: " + filename);
-    }
-
     std::vector<std::string> taxa_names;
     std::vector<std::vector<int>> matrix;
     
-    // Read header line to get character names
-    std::string line;
-    std::getline(file, line);
-    
-    // Parse each data line
-    while (std::getline(file, line)) {
-        std::istringstream ss(line);
-        std::string taxon_name;
-        std::getline(ss, taxon_name, ','); // First column is taxon name
-        taxa_names.push_back(taxon_name);
+    try {
+        csv::CSVReader reader(filename);
         
-        std::vector<int> character_states;
-        std::string cell;
-        while (std::getline(ss, cell, ',')) {
-            if (cell.empty() || cell == "?") {
-                character_states.push_back(-1); // Unknown data
-            } else {
-                try {
-                    character_states.push_back(std::stoi(cell));
-                } catch (const std::exception& e) {
-                    throw std::runtime_error("Invalid character state in CSV: " + cell);
+        for (auto& row: reader) {
+            std::string taxon_name = row[0].get<std::string>();
+            taxa_names.push_back(taxon_name);
+            
+            std::vector<int> character_states;
+            for (size_t i = 1; i < row.size(); i++) {
+                if (row[i].is_null() || row[i].get<std::string>() == "?") {
+                    character_states.push_back(-1); // Unknown data
+                } else {
+                    try {
+                        character_states.push_back(row[i].get<int>());
+                    } catch (const std::exception& e) {
+                        throw std::runtime_error("Invalid character state in CSV: " + row[i].get<std::string>());
+                    }
                 }
             }
+            matrix.push_back(character_states);
         }
-        matrix.push_back(character_states);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to parse character matrix file: " + std::string(e.what()));
+    }
+    
+    if (taxa_names.empty()) {
+        throw std::runtime_error("No data found in character matrix file");
     }
     
     return {taxa_names, matrix};
@@ -143,28 +140,27 @@ std::pair<std::vector<std::string>, std::vector<std::vector<int>>> parse_charact
  * @return Vector of (character, state, probability) tuples
  */
 std::vector<std::tuple<int, int, double>> parse_mutation_priors(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open mutation priors file: " + filename);
-    }
-    
     std::vector<std::tuple<int, int, double>> priors;
-    std::string line;
     
-    while (std::getline(file, line)) {
-        std::istringstream ss(line);
-        std::string cell;
+    try {
+        csv::CSVFormat format;
+        format.delimiter(',').quote('"').no_header();
+
+        csv::CSVReader reader(filename, format);
         
-        std::getline(ss, cell, ',');
-        int character = std::stoi(cell);
-        
-        std::getline(ss, cell, ',');
-        int state = std::stoi(cell);
-        
-        std::getline(ss, cell, ',');
-        double probability = std::stod(cell);
-        
-        priors.emplace_back(character, state, probability);
+        for (auto& row: reader) {
+            if (row.size() < 3) {
+                throw std::runtime_error("Invalid format in mutation priors file: expected at least 3 columns");
+            }
+            
+            int character = row[0].get<int>();
+            int state = row[1].get<int>();
+            double probability = row[2].get<double>();
+            
+            priors.emplace_back(character, state, probability);
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to parse mutation priors file: " + std::string(e.what()));
     }
     
     return priors;
@@ -209,11 +205,9 @@ phylogeny_data process_phylogeny_data(
     const tree& t, const std::string& character_matrix_file, 
     const std::string& mutation_priors_file = "") {
     
-    // Parse character matrix
     spdlog::info("Parsing character matrix...");
     auto [taxa_names, raw_matrix] = parse_character_matrix(character_matrix_file);
     
-    // Get number of characters
     size_t num_characters = 0;
     for (const auto& row : raw_matrix) {
         num_characters = std::max(num_characters, row.size());
@@ -221,7 +215,6 @@ phylogeny_data process_phylogeny_data(
     
     spdlog::info("Found {} taxa and {} characters", taxa_names.size(), num_characters);
     
-    // Parse or generate mutation priors
     std::vector<std::tuple<int, int, double>> raw_priors;
     if (!mutation_priors_file.empty()) {
         spdlog::info("Parsing mutation priors...");
@@ -231,14 +224,12 @@ phylogeny_data process_phylogeny_data(
         raw_priors = generate_uniform_priors(raw_matrix, num_characters);
     }
     
-    // Create state mappings and recode character matrix
     std::vector<std::vector<int>> character_matrix_recode(raw_matrix.size(), std::vector<int>(num_characters));
     std::vector<std::map<int, int>> original_to_new_mappings(num_characters);
     size_t max_alphabet_size = 0;
     
     spdlog::info("Recoding character states...");
     for (size_t c = 0; c < num_characters; ++c) {
-        // Find unique valid states for this character
         std::set<int> valid_states;
         for (const auto& row : raw_matrix) {
             if (c < row.size() && row[c] > 0) {
@@ -246,47 +237,41 @@ phylogeny_data process_phylogeny_data(
             }
         }
         
-        // Create mapping from original to new states
         int new_idx = 1;
         for (int orig_state : valid_states) {
             original_to_new_mappings[c][orig_state] = new_idx++;
         }
         
-        // Update max alphabet size
         if (valid_states.size() > max_alphabet_size) {
             max_alphabet_size = valid_states.size();
         }
         
-        // Apply mapping to character matrix
         for (size_t i = 0; i < raw_matrix.size(); ++i) {
             if (c < raw_matrix[i].size()) {
                 int orig_state = raw_matrix[i][c];
                 if (orig_state > 0 && original_to_new_mappings[c].count(orig_state)) {
                     character_matrix_recode[i][c] = original_to_new_mappings[c][orig_state];
                 } else if (orig_state == 0) {
-                    character_matrix_recode[i][c] = 0; // Missing state
+                    character_matrix_recode[i][c] = 0;
                 } else {
-                    character_matrix_recode[i][c] = -1; // Unknown state
+                    character_matrix_recode[i][c] = -1;
                 }
             } else {
-                character_matrix_recode[i][c] = -1; // Unknown state
+                character_matrix_recode[i][c] = -1;
             }
         }
     }
     
-    // Create mapping from taxa names to row indices
     std::unordered_map<std::string, size_t> taxa_name_to_idx;
     for (size_t i = 0; i < taxa_names.size(); ++i) {
         taxa_name_to_idx[taxa_names[i]] = i;
     }
     
-    // Reorder character matrix to match leaf order in tree
     std::vector<std::vector<int>> reordered_matrix(t.num_leaves, std::vector<int>(num_characters));
     std::vector<bool> leaf_mapped(t.num_leaves, false);
     
     spdlog::info("Reordering rows to match tree structure...");
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
-        // Only process leaf nodes
         if (t.tree.out_degree(node_id) == 0) {
             size_t leaf_id = t.tree[node_id].data;
             
@@ -294,17 +279,14 @@ phylogeny_data process_phylogeny_data(
                 throw std::runtime_error("Leaf ID out of range: " + std::to_string(leaf_id));
             }
             
-            // Look up this leaf's name
             const std::string& leaf_name = t.node_names[leaf_id];
             
             if (taxa_name_to_idx.find(leaf_name) == taxa_name_to_idx.end()) {
                 throw std::runtime_error("Taxon name from tree not found in character matrix: " + leaf_name);
             }
             
-            // Get row from original matrix
             size_t orig_row = taxa_name_to_idx[leaf_name];
             
-            // Copy to reordered matrix
             for (size_t c = 0; c < num_characters; ++c) {
                 reordered_matrix[leaf_id][c] = character_matrix_recode[orig_row][c];
             }
@@ -313,14 +295,12 @@ phylogeny_data process_phylogeny_data(
         }
     }
     
-    // Check that all leaves were mapped
     for (size_t i = 0; i < t.num_leaves; ++i) {
         if (!leaf_mapped[i]) {
             spdlog::warn("Leaf {} not mapped to any taxon in character matrix", i);
         }
     }
     
-    // Recode mutation priors
     std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(max_alphabet_size, 0.0));
     
     spdlog::info("Recoding mutation priors...");
@@ -330,7 +310,7 @@ phylogeny_data process_phylogeny_data(
         }
         
         if (orig_state <= 0) {
-            continue; // Skip states 0 and -1
+            continue; // skip states 0 and -1
         }
         
         auto& mapping = original_to_new_mappings[character];
@@ -339,29 +319,8 @@ phylogeny_data process_phylogeny_data(
             continue;
         }
         
-        int new_state = mapping[orig_state] - 1; // 0-indexed in the priors array
+        int new_state = mapping[orig_state] - 1;
         recoded_priors[character][new_state] = probability;
-    }
-    
-    // Extract character names if present in the first line
-    std::vector<std::string> character_names;
-    std::ifstream file(character_matrix_file);
-    if (file.is_open()) {
-        std::string header_line;
-        if (std::getline(file, header_line)) {
-            std::istringstream header_ss(header_line);
-            std::string cell;
-            std::getline(header_ss, cell, ','); // Skip first column (row names)
-            
-            while (std::getline(header_ss, cell, ',')) {
-                character_names.push_back(cell);
-            }
-        }
-    }
-    
-    // Fill in character names if not enough
-    while (character_names.size() < num_characters) {
-        character_names.push_back("character_" + std::to_string(character_names.size()));
     }
     
     phylogeny_data result;
@@ -369,7 +328,6 @@ phylogeny_data process_phylogeny_data(
     result.max_alphabet_size = max_alphabet_size;
     result.character_matrix = reordered_matrix;
     result.mutation_priors = recoded_priors;
-    result.character_names = character_names;
     
     return result;
 }
@@ -458,7 +416,7 @@ int main(int argc, char ** argv) {
             for (size_t j = 0; j < std::min(data.character_matrix[i].size(), size_t(10)); ++j) {
                 row << data.character_matrix[i][j] << " ";
             }
-            spdlog::info("  Leaf {}: [{}]", i, row.str());
+            spdlog::info("  Leaf {}: [{}]", t.node_names[i], row.str());
         }
     }
     
