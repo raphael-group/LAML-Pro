@@ -50,6 +50,29 @@ void laml_model::compute_log_pmatrix_transpose_vector_product(
     const std::vector<double>& log_vector,
     std::vector<double>& result
 ) const {
+    size_t alphabet_size = this->alphabet_sizes[character];
+    double nu = this->parameters[0];
+
+    std::vector<double>& tmp = *(d.buffer);
+    std::copy(log_vector.begin(), log_vector.begin() + alphabet_size, tmp.begin());
+
+    /* Handle i = 0 which is state = ? case */
+    tmp[0] = log_vector[0];
+    for (size_t i = 1; i < alphabet_size; i++) {
+        tmp[i] = log_vector[i] + d.v2;
+    }
+    result[0] = log_sum_exp(tmp.begin(), tmp.begin() + alphabet_size);
+
+    /* Handle i = 1 which is state = 0 case */
+    result[1] = -branch_length * (1 + nu) + log_vector[1];
+    
+    /* Handle remaining i \notin {0, 1}, non-missing cases */
+    double tmp2[] = {0.0, 0.0};
+    for (size_t i = 2; i < alphabet_size; i++) {
+        tmp2[0] = log_vector[1] + log_mutation_priors[character][i - 2] - branch_length * nu + d.v1;
+        tmp2[1] = log_vector[i] - branch_length * nu;
+        result[i] = log_sum_exp(tmp2, tmp2 + 2);
+    }
 }
 
 void laml_model::compute_taxa_log_inside_likelihood(

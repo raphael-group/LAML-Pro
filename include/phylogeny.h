@@ -188,7 +188,7 @@ void phylogeny<D>::compute_edge_inside_log_likelihood(
             double blen = branch_lengths[node];
             model.compute_log_pmatrix_vector_product(node_data[node], character, blen, tmp_buffer_2, tmp_buffer_1);
             for (size_t j = 0; j < alphabet_size; j++) {
-                b(character, node, j) += tmp_buffer_1[j];
+                b(character, node, j) = tmp_buffer_1[j];
             } 
         }
     }
@@ -202,11 +202,24 @@ void phylogeny<D>::compute_outside_log_likelihood(
     likelihood_buffer& b, 
     std::vector<D> &node_data
 ) const {
+    std::vector<int> preorder = tree.preorder_traversal(root_id);
+
     size_t num_characters = model.alphabet_sizes.size();
     int max_alphabet_size = *std::max_element(model.alphabet_sizes.begin(), model.alphabet_sizes.end());
     std::vector<double> tmp_buffer_1(max_alphabet_size, 0.0);
     std::vector<double> tmp_buffer_2(max_alphabet_size, 0.0);
-    for (auto u_id : tree.nodes()) {
+
+    size_t root = tree[root_id].data;
+    for (size_t character = 0; character < num_characters; character++) {
+        size_t alphabet_size = model.alphabet_sizes[character];
+        model.compute_root_distribution(node_data[root], character, tmp_buffer_1);
+        model.compute_log_pmatrix_vector_product(node_data[root], character, branch_lengths[root], tmp_buffer_1, tmp_buffer_2);
+        for (size_t j = 0; j < alphabet_size; j++) {
+            b(character, root, j) = tmp_buffer_2[j];
+        }
+    }
+
+    for (size_t u_id : preorder) {
         if (tree.in_degree(u_id) == 0) continue;
 
         size_t u = tree[u_id].data;
@@ -225,10 +238,10 @@ void phylogeny<D>::compute_outside_log_likelihood(
         for (size_t character = 0; character < num_characters; character++) {
             size_t alphabet_size = model.alphabet_sizes[character];
             for (size_t j = 0; j < alphabet_size; j++) {
-                tmp_buffer_1[j] = edge_inside_ll(character, v, j) + inside_ll(character, w, j);
+                tmp_buffer_1[j] = edge_inside_ll(character, v, j) + b(character, w, j);
             }
 
-            double blen = branch_lengths[w];
+            double blen = branch_lengths[u];
             model.compute_log_pmatrix_transpose_vector_product(node_data[u], character, blen, tmp_buffer_1, tmp_buffer_2);
             for (size_t j = 0; j < alphabet_size; j++) {
                 b(character, u, j) = tmp_buffer_2[j];
