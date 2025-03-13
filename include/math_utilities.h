@@ -7,7 +7,10 @@
 
 #include "gcem.hpp"
 
-/* flags to enable fast math functions */
+/* 
+ * Flags to enable fast math functions, 
+ * slightly altering likelihood calculations 
+ */
 #define FAST_LOG 1
 #define FAST_EXP 1
 
@@ -39,8 +42,8 @@ constexpr std::array<double, TABLE_SIZE + 1> make_log_table() {
     return table;
 }
 
-auto EXP_TABLE = make_exp_table();
-auto LOG_TABLE = make_log_table();
+inline auto EXP_TABLE = make_exp_table();
+inline auto LOG_TABLE = make_log_table();
 
 inline double fast_exp(double x) {
     if (x <= EXP_MIN) return 0.0;

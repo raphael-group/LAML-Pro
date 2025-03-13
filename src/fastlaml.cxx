@@ -380,6 +380,26 @@ int main(int argc, char ** argv) {
 
     spdlog::info("Loading tree from Newick file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
+    
+    // Check if tree is binary
+    bool is_binary = true;
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id != t.root_id && t.tree.in_degree(node_id) != 1) {
+            is_binary = false;
+            break;
+        }
+        
+        size_t out_degree = t.tree.out_degree(node_id);
+        if (out_degree != 0 && out_degree != 2) {
+            is_binary = false;
+            break;
+        }
+    }
+    
+    if (!is_binary) {
+        spdlog::error("Input tree is not binary. Each node must have exactly 0 or 2 children.");
+        std::exit(1);
+    }
 
     spdlog::info("Processing character matrix and mutation priors...");
     phylogeny_data data = process_phylogeny_data(
@@ -399,6 +419,8 @@ int main(int argc, char ** argv) {
     );
 
     likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
+    likelihood_buffer edge_inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
+    likelihood_buffer outside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -408,6 +430,7 @@ int main(int argc, char ** argv) {
         std::vector<double> internal_comp_buffer(data.max_alphabet_size + 2);
         auto model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
         llh = phylo.compute_inside_log_likelihood(model, inside_ll, model_data);
+        phylo.compute_edge_inside_log_likelihood(model, inside_ll, edge_inside_ll, model_data);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -416,5 +439,6 @@ int main(int argc, char ** argv) {
     spdlog::info("Log likelihood: {}", llh);
     spdlog::info("Computation time: {} ms", runtime);
 
+    
     return 0;
 }
