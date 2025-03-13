@@ -440,56 +440,6 @@ int main(int argc, char ** argv) {
 
     spdlog::info("Log likelihood: {}", llh);
     spdlog::info("Computation time: {} ms", runtime);
-
-    std::vector<std::vector<double>> check_matrix(t.tree.nodes().size(), std::vector<double>(data.num_characters));
-    for (auto node : t.tree.nodes()) {
-        for (size_t c = 0; c < data.num_characters; ++c) {
-            size_t alphabet_size = model.alphabet_sizes[c];
-            std::vector<double> buff(alphabet_size);
-            for (size_t j = 0; j <  alphabet_size; j++) {
-                buff[j] = inside_ll(c, t.tree[node].data, j) + outside_ll(c, t.tree[node].data, j);
-            }
-
-            double sum = log_sum_exp(buff.begin(), buff.end());
-            check_matrix[t.tree[node].data][c] = sum;
-        }
-    }
-
-    // Check that the matrix is constant down the columns
-    // For each character, the sum of inside and outside log likelihoods
-    // should be the same for all nodes
-    spdlog::info("Checking consistency of log likelihoods...");
-    for (size_t c = 0; c < data.num_characters; ++c) {
-        double first_value = check_matrix[0][c];
-        bool is_constant = true;
-        
-        for (size_t i = 1; i < t.tree.nodes().size(); ++i) {
-            // Allow for small floating-point differences
-            if (std::abs(check_matrix[i][c] - first_value) > 1e-2) {
-                spdlog::error("Log likelihood not constant for character {}: node 0 = {}, node {} = {}", 
-                              c, first_value, i, check_matrix[i][c]);
-                is_constant = false;
-                break;
-            }
-        }
-        
-        if (!is_constant) {
-            spdlog::warn("Character {} has inconsistent log likelihoods across nodes", c);
-        }
-    }
-
-    // Write results to output file
-    std::ofstream output_file(program.get<std::string>("--output"));
-    if (!output_file.is_open()) {
-        spdlog::error("Failed to open output file: {}", program.get<std::string>("--output"));
-        std::exit(1);
-    }
-
-    output_file << "Final log likelihood: " << llh << std::endl;
-    output_file << "Computation time (ms): " << runtime << std::endl;
-    output_file.close();
-
-    spdlog::info("Results written to {}", program.get<std::string>("--output"));
     
     return 0;
 }
