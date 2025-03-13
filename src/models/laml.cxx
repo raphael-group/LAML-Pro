@@ -58,7 +58,6 @@ void laml_model::compute_taxa_log_inside_likelihood(
     size_t taxa_id,
     std::vector<double>& result
 ) const {
-    double phi = this->parameters[1];
     int state = this->character_matrix[taxa_id][character];
     
     std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);

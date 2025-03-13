@@ -10,24 +10,24 @@
 class likelihood_buffer {
     private:
     std::vector<double> buffer;
+    size_t num_nodes;
     size_t num_characters;
     size_t max_alphabet_size;
-    size_t num_nodes;
 
     public:
     likelihood_buffer(size_t num_characters, size_t max_alphabet_size, size_t num_nodes, double fill_value = -1e9)
-        : num_characters(num_characters),
-          max_alphabet_size(max_alphabet_size),
-          num_nodes(num_nodes) {
-        buffer.resize(num_characters * num_nodes * max_alphabet_size, fill_value);
+        : num_nodes(num_nodes),
+          num_characters(num_characters),
+          max_alphabet_size(max_alphabet_size) {
+        buffer.resize(num_nodes * num_characters * max_alphabet_size, fill_value);
     }
 
-    double& operator()(size_t character, size_t node, size_t symbol) {
-        return buffer[character * (num_nodes * max_alphabet_size) + node * max_alphabet_size + symbol];
+    double& operator()(size_t character, size_t node, size_t state) {
+        return buffer[node * (num_characters * max_alphabet_size) + character * max_alphabet_size + state];
     }
 
-    const double& operator()(size_t character, size_t node, size_t symbol) const {
-        return buffer[character * (num_nodes * max_alphabet_size) + node * max_alphabet_size + symbol];
+    const double& operator()(size_t character, size_t node, size_t state) const {
+        return buffer[node * (num_characters * max_alphabet_size) + character * max_alphabet_size + state];
     }
 };
 
@@ -60,46 +60,49 @@ public:
 };
 
 template <typename D>
-static void compute_inside_for_character(
+static void compute_inside_helper(
     const phylogenetic_model<D> &model,
     std::vector<D> &node_data,
     const std::vector<int> &post_order, 
     const phylogeny<D> &p,
-    likelihood_buffer &b, 
-    size_t character
+    likelihood_buffer &b
 ) {
-    size_t alphabet_size = model.alphabet_sizes[character];
-    std::vector<double> tmp_buffer_1(alphabet_size, 0.0);
-    std::vector<double> tmp_buffer_2(alphabet_size, 0.0);
+    int max_alphabet_size = *std::max_element(model.alphabet_sizes.begin(), model.alphabet_sizes.end());
+    std::vector<double> tmp_buffer_1(max_alphabet_size, 0.0);
+    std::vector<double> tmp_buffer_2(max_alphabet_size, 0.0);
 
     for (auto node_id : post_order) {
         size_t node = p.tree[node_id].data;
 
-        if (p.tree.out_degree(node_id) == 0) {
-            model.compute_taxa_log_inside_likelihood(node_data[node], character, node, tmp_buffer_1);
-            for (size_t j = 0; j < alphabet_size; j++) {
-                b(character, node, j) = tmp_buffer_1[j];
+        for (size_t character = 0; character < model.alphabet_sizes.size(); character++) {
+            size_t alphabet_size = model.alphabet_sizes[character];
+
+            if (p.tree.out_degree(node_id) == 0) {
+                model.compute_taxa_log_inside_likelihood(node_data[node], character, node, tmp_buffer_1);
+                for (size_t j = 0; j < alphabet_size; j++) {
+                    b(character, node, j) = tmp_buffer_1[j];
+                }
+
+                continue;
             }
 
-            continue;
-        }
-
-        for (size_t j = 0; j < alphabet_size; j++) {
-            b(character, node, j) = 0.0;
-        }
-
-        for (auto u_id : p.tree.successors(node_id)) {
-            size_t u = p.tree[u_id].data;
-            double blen = p.branch_lengths[u];
-
             for (size_t j = 0; j < alphabet_size; j++) {
-                tmp_buffer_2[j] = b(character, u, j);
+                b(character, node, j) = 0.0;
             }
 
-            model.compute_log_pmatrix_vector_product(node_data[u], character, blen, tmp_buffer_2, tmp_buffer_1);
-            for (size_t j = 0; j < alphabet_size; j++) {
-                b(character, node, j) += tmp_buffer_1[j];
-            } 
+            for (auto u_id : p.tree.successors(node_id)) {
+                size_t u = p.tree[u_id].data;
+                double blen = p.branch_lengths[u];
+
+                for (size_t j = 0; j < alphabet_size; j++) {
+                    tmp_buffer_2[j] = b(character, u, j);
+                }
+
+                model.compute_log_pmatrix_vector_product(node_data[u], character, blen, tmp_buffer_2, tmp_buffer_1);
+                for (size_t j = 0; j < alphabet_size; j++) {
+                    b(character, node, j) += tmp_buffer_1[j];
+                } 
+            }
         }
     }
 }
@@ -112,11 +115,9 @@ double phylogeny<D>::compute_inside_log_likelihood(
 ) {
     std::vector<int> post_order = this->tree.postorder_traversal(this->root_id);
 
-    size_t num_characters = model.alphabet_sizes.size();
-    for (size_t c = 0; c < num_characters; ++c) {
-        compute_inside_for_character(model, node_data, post_order, *this, b, c);
-    }
+    compute_inside_helper(model, node_data, post_order, *this, b);
 
+    int num_characters = model.alphabet_sizes.size();
     size_t root = this->tree[this->root_id].data;
     double llh = 0.0;
     for (size_t c = 0; c < num_characters; ++c) {
