@@ -21,7 +21,7 @@ public:
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
-     * @return Result vector of the log-product of size alphabet_sizes[character]
+     * @param result solution vector for the log-product of size alphabet_sizes[character]
      */
     virtual void compute_log_pmatrix_vector_product(
         D& data,
@@ -41,7 +41,7 @@ public:
      * @param character The character index
      * @param branch_length The branch length
      * @param log_vector Input vector in log space
-     * @return Result vector of the log-product of size alphabet_sizes[character]
+     * @param result solution vector for the log-product of size alphabet_sizes[character]
      */
     virtual void compute_log_pmatrix_transpose_vector_product(
         D& data,
@@ -57,7 +57,7 @@ public:
      * @param data An arbitrary, model specific data object
      * @param character The character index
      * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
-     * @return Vector of log likelihoods for each state of size alphabet_sizes[character]
+     * @param result solution vector for the log-product of size alphabet_sizes[character]
      */
     virtual void compute_taxa_log_inside_likelihood(
         D& data,
@@ -71,7 +71,7 @@ public:
      *
      * @param data An arbitrary, model specific data object
      * @param character The character index
-     * @return Vector containing the root distribution of size alphabet_sizes[character]
+     * @param result solution vector for the log-product of size alphabet_sizes[character]
      */
     virtual void compute_root_distribution(
         D& data,

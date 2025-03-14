@@ -13,3 +13,9 @@
 [submodule "third-party/argparse"]
 	path = third-party/argparse
 	url = https://github.com/p-ranav/argparse
+[submodule "third-party/gcem"]
+	path = third-party/gcem
+	url = https://github.com/kthohr/gcem
+[submodule "third-party/eigen"]
+	path = third-party/eigen
+	url = https://github.com/libigl/eigen

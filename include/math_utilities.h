@@ -5,7 +5,7 @@
 #include <cmath>
 #include <algorithm>
 
-#include "gcem.hpp"
+#include "extern/gcem.hpp"
 
 /* 
  * Flags to enable fast math functions, 
