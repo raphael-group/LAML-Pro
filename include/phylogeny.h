@@ -63,8 +63,8 @@ class likelihood_buffer {
         return buffer[node * (num_characters * max_alphabet_size) + character * max_alphabet_size + state];
     }
 };
-namespace phylogeny {
 
+namespace phylogeny {
 template <typename D>
 std::vector<double> compute_inside_log_likelihood(
     const phylogenetic_model<D>& model,
