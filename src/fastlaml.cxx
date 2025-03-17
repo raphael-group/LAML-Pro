@@ -33,6 +33,14 @@
 using Eigen::VectorXd;
 using namespace LBFGSpp;
 
+double sigmoid(double x) {
+    return 1.0 / (1.0 + std::exp(-x));
+}
+
+double logit(double x) {
+    return std::log(x / (1.0 - x));
+}
+
 class laml_m_step_objective
 {
 private:
@@ -53,8 +61,8 @@ public:
 
     double operator()(const VectorXd& parameters, VectorXd& gradient)
     {
-        double nu = parameters[0];
-        double phi = parameters[1];
+        double nu = std::exp(parameters[0]);
+        double phi = sigmoid(parameters[1]);
 
         double result = 0.0;
         double dnu = 0.0;
@@ -63,7 +71,7 @@ public:
         gradient.setZero();
 
         for (size_t i = 0; i < responsibilities.size(); ++i) {
-            double blen = parameters[i + 2];
+            double blen = std::exp(parameters[i + 2]);
 
             double exp_blen     = std::exp(-blen);
             double exp_blen_nu  = std::exp(-blen * nu);
@@ -95,6 +103,8 @@ public:
                 dnu -= responsibilities[i][3] * blen;
                 gradient[i + 2] += -responsibilities[i][3] * nu;
             }
+
+            gradient[i + 2] *= blen;
         }
 
         {
@@ -106,8 +116,8 @@ public:
             dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
         }
 
-        gradient[0] = -dnu;
-        gradient[1] = -dphi;
+        gradient[0] = -dnu * nu;
+        gradient[1] = -dphi * (std::exp(-parameters[1]) / std::pow(1.0 + std::exp(-parameters[1]), 2));
         for (size_t i = 0; i < responsibilities.size(); ++i) {
             gradient[i + 2] = -gradient[i + 2];
         }
@@ -206,16 +216,11 @@ void laml_expectation_step(
     } 
 }
 
-double laml_expectation_maximization(tree t, phylogeny_data data, double initial_nu, double initial_phi) {
+double laml_expectation_maximization(tree t, const phylogeny_data& data, double initial_nu, double initial_phi) {
     laml_model model(t.tree, data.character_matrix, data.mutation_priors, initial_nu, initial_phi);
 
     int num_missing = 0;
     int num_not_missing = 0;
-
-    // initialize branch lengths to 1.0
-    for (size_t i = 0; i < t.num_nodes; ++i) {
-        t.branch_lengths[i] = 1.0; //((double) rand()) / double(RAND_MAX);
-    }
 
     for (size_t i = 0; i < data.character_matrix.size(); ++i) {
         for (size_t j = 0; j < data.character_matrix[i].size(); ++j) {
@@ -231,29 +236,26 @@ double laml_expectation_maximization(tree t, phylogeny_data data, double initial
     likelihood_buffer edge_inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
     likelihood_buffer outside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
 
-    // Set up the box-constrained L-BFGS solver
-    LBFGSBParam<double> lbfgs_params;
+    // set up the L-BFGS solver
+    LBFGSParam<double> lbfgs_params;
     lbfgs_params.epsilon = 1e-3;
     lbfgs_params.epsilon_rel = 1e-3;
     lbfgs_params.max_iterations = 100;
 
     VectorXd params = VectorXd::Zero(t.num_nodes + 2);
-    VectorXd lb = VectorXd::Constant(t.num_nodes + 2, 1e-6);
-    VectorXd ub = VectorXd::Constant(t.num_nodes + 2, std::numeric_limits<double>::infinity());
-    ub[1] = 1.0;
-
-    LBFGSBSolver<double> solver(lbfgs_params);
+    LBFGSSolver<double> solver(lbfgs_params);
 
     // initialize model parameters
     std::vector<double> internal_comp_buffer(data.max_alphabet_size + 2);
     auto model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
 
-    params[0] = model.parameters[0];
-    params[1] = model.parameters[1];
+    params[0] = std::log(model.parameters[0]);
+    params[1] = logit(model.parameters[1]);
     for (size_t i = 0; i < t.num_nodes; ++i) {
-        params[i + 2] = t.branch_lengths[i];
+        params[i + 2] = std::log(t.branch_lengths[i]);
     }
 
+    double llh = 0.0;
     int MAX_EM_ITERATIONS = 100;
     double EM_STOPPING_CRITERION = 1e-5;
     for (int i = 0; i < MAX_EM_ITERATIONS; i++) {
@@ -275,12 +277,12 @@ double laml_expectation_maximization(tree t, phylogeny_data data, double initial
         laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
         
         double fx;
-        int niter = solver.minimize(fun, params, fx, lb, ub);
+        int niter = solver.minimize(fun, params, fx);
 
-        model.parameters[0] = params[0];
-        model.parameters[1] = params[1];
+        model.parameters[0] = std::exp(params[0]);
+        model.parameters[1] = sigmoid(params[1]);
         for (size_t i = 0; i < t.num_nodes; ++i) {
-            t.branch_lengths[i] = params[i + 2];
+            t.branch_lengths[i] = std::exp(params[i + 2]);
         }
 
         // update model parameters
@@ -292,12 +294,14 @@ double laml_expectation_maximization(tree t, phylogeny_data data, double initial
             llh_after += likelihood[character];
         }
 
-        if (abs(llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
+        llh = llh_after;
+
+        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
             break;
         }
     }
 
-    return 0.0;
+    return llh;
 }
 
 int main(int argc, char ** argv) {
