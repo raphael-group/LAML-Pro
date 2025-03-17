@@ -57,7 +57,7 @@ public:
      * @param data An arbitrary, model specific data object
      * @param character The character index
      * @param taxa_id The taxa identifier which is between 0 and num_taxa - 1
-     * @param result solution vector for the log-product of size alphabet_sizes[character]
+     * @param result log inside likelihood for the taxa at the specified character
      */
     virtual void compute_taxa_log_inside_likelihood(
         D& data,
@@ -71,7 +71,7 @@ public:
      *
      * @param data An arbitrary, model specific data object
      * @param character The character index
-     * @param result solution vector for the log-product of size alphabet_sizes[character]
+     * @param result log of the root distribution for the character
      */
     virtual void compute_root_distribution(
         D& data,

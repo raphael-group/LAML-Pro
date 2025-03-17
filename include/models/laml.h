@@ -27,18 +27,16 @@ struct laml_data {
 */
 class laml_model : public phylogenetic_model<laml_data> {
     public:
-    digraph<size_t> tree;
-    std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
-    std::vector<std::vector<double>> mutation_priors; // [character][state]
+    std::vector<std::vector<int>> character_matrix;       // [leaf_id][character]
+    std::vector<std::vector<double>> mutation_priors;     // [character][state]
     std::vector<std::vector<double>> log_mutation_priors; // [character][state]    
 
     laml_model(
-        const digraph<size_t>& tree,
         const std::vector<std::vector<int>>& character_matrix,
         const std::vector<std::vector<double>>& mutation_priors,
         double nu,
         double phi
-    ) : tree(tree), character_matrix(character_matrix), mutation_priors(mutation_priors) {
+    ) : character_matrix(character_matrix), mutation_priors(mutation_priors) {
         parameters = {nu, phi}; // nu, phi
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
@@ -64,7 +62,11 @@ class laml_model : public phylogenetic_model<laml_data> {
     void compute_taxa_log_inside_likelihood(laml_data& d, size_t character, size_t taxa_id, std::vector<double>& result) const override;
     void compute_root_distribution(laml_data& d, size_t character, std::vector<double>& result) const override;
 
-    std::vector<laml_data> initialize_data(std::vector<double> *buffer, const std::vector<double>& branch_lengths) const {
+    std::vector<laml_data> initialize_data(
+        const digraph<size_t> &tree,
+        const std::vector<double> &branch_lengths,
+        std::vector<double> *buffer
+    ) const {
         std::vector<laml_data> result(tree.size());
 
         for (size_t i = 0; i < tree.size(); ++i) {
