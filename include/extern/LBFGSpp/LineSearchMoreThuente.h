@@ -6,7 +6,7 @@
 
 #include <stdexcept>  // std::invalid_argument, std::runtime_error
 #include <Eigen/Core>
-#include "LBFGSpp/Param.h"
+#include "./Param.h"
 
 namespace LBFGSpp {
 

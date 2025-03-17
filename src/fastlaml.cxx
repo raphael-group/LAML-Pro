@@ -25,6 +25,100 @@
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
 
+#include <Eigen/Core>
+#include <iostream>
+#include "extern/LBFGSB.h"
+#include "extern/LBFGS.h"
+
+using Eigen::VectorXd;
+using namespace LBFGSpp;
+
+class laml_m_step_objective
+{
+private:
+    std::vector<std::array<double, 6>> responsibilities;
+    double leaf_responsibility;
+    int num_missing;
+    int num_not_missing;
+public:
+    laml_m_step_objective(
+        std::vector<std::array<double, 6>>& responsibilities,
+        double leaf_responsibility,
+        int num_missing,
+        int num_not_missing
+    ) : responsibilities(responsibilities), 
+        leaf_responsibility(leaf_responsibility),
+        num_missing(num_missing), 
+        num_not_missing(num_not_missing) {}
+
+    double operator()(const VectorXd& parameters, VectorXd& gradient)
+    {
+        double nu = parameters[0];
+        double phi = parameters[1];
+
+        double result = 0.0;
+        double dnu = 0.0;
+        double dphi = 0.0;
+
+        gradient.setZero();
+
+        for (size_t i = 0; i < responsibilities.size(); ++i) {
+            double blen = parameters[i + 2];
+
+            double exp_blen     = std::exp(-blen);
+            double exp_blen_nu  = std::exp(-blen * nu);
+            double log_exp_blen = std::log(1.0 - exp_blen);
+
+            result += -responsibilities[i][0] * blen * (1.0 + nu);
+            dnu    += -responsibilities[i][0] * blen;
+            gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
+
+            {
+                double log_part = log_exp_blen;
+                result += responsibilities[i][1] * (log_part - blen * nu);
+                dnu -= responsibilities[i][1] * blen;
+                double d_log_part = exp_blen / (1.0 - exp_blen);
+                gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
+            }
+
+            {
+                double val = 1.0 - exp_blen_nu;
+                result += (responsibilities[i][2] + responsibilities[i][4]) * std::log(val);
+                double d_nu = (blen * exp_blen_nu) / val;
+                dnu += (responsibilities[i][2] + responsibilities[i][4]) * d_nu;
+                double d_blen = (nu * exp_blen_nu) / val;
+                gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
+            }
+
+            {
+                result += -responsibilities[i][3] * blen * nu;
+                dnu -= responsibilities[i][3] * blen;
+                gradient[i + 2] += -responsibilities[i][3] * nu;
+            }
+        }
+
+        {
+            double a = num_not_missing * std::log(1.0 - phi);
+            double b = (num_missing - leaf_responsibility) * std::log(phi);
+            result += a + b;
+
+            dphi += num_not_missing * (-1.0 / (1.0 - phi));
+            dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
+        }
+
+        gradient[0] = -dnu;
+        gradient[1] = -dphi;
+        for (size_t i = 0; i < responsibilities.size(); ++i) {
+            gradient[i + 2] = -gradient[i + 2];
+        }
+
+        return -result;
+    }
+};
+
+/*                            responsibility vector: 
+    [C_zero_zero, C_zero_alpha, C_zero_miss, C_alpha_alpha, C_alpha_miss, C_miss_miss]
+*/
 void laml_expectation_step(
     const tree& t,
     const laml_model& model,
@@ -33,18 +127,9 @@ void laml_expectation_step(
     const likelihood_buffer& outside_ll,
     const likelihood_buffer& edge_inside_ll,
     const std::vector<laml_data>& node_data,
-    std::vector<std::array<double, 6>>& responsibilities
+    std::vector<std::array<double, 6>>& responsibilities,
+    double& leaf_responsibility
 ) {
-    /* 
-      Order of Responsibilities:
-        0: C_zero_zero
-        1: C_zero_alpha 
-        2: C_zero_miss
-        3: C_alpha_alpha
-        4: C_alpha_miss
-        5: C_miss_miss
-    */
-
     double nu = model.parameters[0];
     double phi = model.parameters[1];
 
@@ -105,18 +190,44 @@ void laml_expectation_step(
             }
             double log_C_alpha_miss = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
-            responsibilities[v_id][0] += fast_exp(log_C_zero_zero);
-            responsibilities[v_id][1] += fast_exp(log_C_zero_alpha);
-            responsibilities[v_id][2] += fast_exp(log_C_zero_miss);
-            responsibilities[v_id][3] += fast_exp(log_C_alpha_alpha);
-            responsibilities[v_id][4] += fast_exp(log_C_alpha_miss);
-            responsibilities[v_id][5] += fast_exp(log_C_miss_miss);
+            responsibilities[v][0] += fast_exp(log_C_zero_zero);
+            responsibilities[v][1] += fast_exp(log_C_zero_alpha);
+            responsibilities[v][2] += fast_exp(log_C_zero_miss);
+            responsibilities[v][3] += fast_exp(log_C_alpha_alpha);
+            responsibilities[v][4] += fast_exp(log_C_alpha_miss);
+            responsibilities[v][5] += fast_exp(log_C_miss_miss);
         }
     }
+
+    leaf_responsibility = 0.0;
+    for (size_t v_id = 0; v_id < t.num_nodes; ++v_id) {
+        if (t.tree.out_degree(v_id) != 0) continue;
+        size_t v = t.tree[v_id].data;
+        for (size_t character = 0; character < num_characters; ++character) {
+            leaf_responsibility += std::exp(inside_ll(character, v, 0) + outside_ll(character, v, 0) - likelihoods[character]);
+        }
+    } 
 }
 
 double laml_expectation_maximization(tree t, phylogeny_data data, double initial_nu, double initial_phi) {
     laml_model model(t.tree, data.character_matrix, data.mutation_priors, initial_nu, initial_phi);
+    int num_missing = 0;
+    int num_not_missing = 0;
+
+    // initialize branch lengths to 1.0
+    for (size_t i = 0; i < t.num_nodes; ++i) {
+        t.branch_lengths[i] = 1.0; //((double) rand()) / double(RAND_MAX);
+    }
+
+    for (size_t i = 0; i < data.character_matrix.size(); ++i) {
+        for (size_t j = 0; j < data.character_matrix[i].size(); ++j) {
+            if (data.character_matrix[i][j] == -1) {
+                num_missing++;
+            } else {
+                num_not_missing++;
+            }
+        }
+    }
 
     likelihood_buffer inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
     likelihood_buffer edge_inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
@@ -129,8 +240,51 @@ double laml_expectation_maximization(tree t, phylogeny_data data, double initial
     phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
 
     std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
-    laml_expectation_step(t, model, likelihood, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, likelihood, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
 
+    double llh_before = 0.0;
+    for (size_t character = 0; character < data.num_characters; ++character) {
+        llh_before += likelihood[character];
+    }
+
+    LBFGSBParam<double> param;
+    param.epsilon = 1e-6;
+    param.max_iterations = 100;
+
+    LBFGSBSolver<double> solver(param);
+    laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
+    VectorXd x = VectorXd::Zero(t.num_nodes + 2);
+    VectorXd lb = VectorXd::Constant(t.num_nodes + 2, 1e-12);
+    VectorXd ub = VectorXd::Constant(t.num_nodes + 2, std::numeric_limits<double>::infinity());
+    ub[1] = 1.0;
+
+    x[0] = initial_nu;
+    x[1] = initial_phi;
+    for (size_t i = 0; i < t.num_nodes; ++i) {
+        x[i + 2] = t.branch_lengths[i];
+    }
+    double fx;
+    int niter = solver.minimize(fun, x, fx, lb, ub);
+
+    spdlog::info("Optimization terminated in {} iterations", niter);
+    std::cout << "nu: " << x[0] << " phi: " << x[1] << std::endl;
+
+    model.parameters[0] = x[0];
+    model.parameters[1] = x[1];
+    for (size_t i = 0; i < t.num_nodes; ++i) {
+        t.branch_lengths[i] = x[i + 2];
+    }
+
+    model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
+    likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+    double llh_after = 0.0;
+    for (size_t character = 0; character < data.num_characters; ++character) {
+        llh_after += likelihood[character];
+    }
+
+    spdlog::info("Log likelihood before: {}", llh_before);
+    spdlog::info("Log likelihood after: {}", llh_after);
     return 0.0;
 }
 
