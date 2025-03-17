@@ -116,9 +116,6 @@ public:
     }
 };
 
-/*                            responsibility vector: 
-    [C_zero_zero, C_zero_alpha, C_zero_miss, C_alpha_alpha, C_alpha_miss, C_miss_miss]
-*/
 void laml_expectation_step(
     const tree& t,
     const laml_model& model,
@@ -211,6 +208,7 @@ void laml_expectation_step(
 
 double laml_expectation_maximization(tree t, phylogeny_data data, double initial_nu, double initial_phi) {
     laml_model model(t.tree, data.character_matrix, data.mutation_priors, initial_nu, initial_phi);
+
     int num_missing = 0;
     int num_not_missing = 0;
 
@@ -233,58 +231,72 @@ double laml_expectation_maximization(tree t, phylogeny_data data, double initial
     likelihood_buffer edge_inside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
     likelihood_buffer outside_ll(data.num_characters, data.max_alphabet_size + 2, t.num_nodes);
 
-    std::vector<double> internal_comp_buffer(data.max_alphabet_size + 2);
-    auto model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
-    auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
-    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
-    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+    // Set up the box-constrained L-BFGS solver
+    LBFGSBParam<double> lbfgs_params;
+    lbfgs_params.epsilon = 1e-3;
+    lbfgs_params.epsilon_rel = 1e-3;
+    lbfgs_params.max_iterations = 100;
 
-    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
-    double leaf_responsibility = 0.0;
-    laml_expectation_step(t, model, likelihood, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
-
-    double llh_before = 0.0;
-    for (size_t character = 0; character < data.num_characters; ++character) {
-        llh_before += likelihood[character];
-    }
-
-    LBFGSBParam<double> param;
-    param.epsilon = 1e-6;
-    param.max_iterations = 100;
-
-    LBFGSBSolver<double> solver(param);
-    laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
-    VectorXd x = VectorXd::Zero(t.num_nodes + 2);
-    VectorXd lb = VectorXd::Constant(t.num_nodes + 2, 1e-12);
+    VectorXd params = VectorXd::Zero(t.num_nodes + 2);
+    VectorXd lb = VectorXd::Constant(t.num_nodes + 2, 1e-6);
     VectorXd ub = VectorXd::Constant(t.num_nodes + 2, std::numeric_limits<double>::infinity());
     ub[1] = 1.0;
 
-    x[0] = initial_nu;
-    x[1] = initial_phi;
+    LBFGSBSolver<double> solver(lbfgs_params);
+
+    // initialize model parameters
+    std::vector<double> internal_comp_buffer(data.max_alphabet_size + 2);
+    auto model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
+
+    params[0] = model.parameters[0];
+    params[1] = model.parameters[1];
     for (size_t i = 0; i < t.num_nodes; ++i) {
-        x[i + 2] = t.branch_lengths[i];
-    }
-    double fx;
-    int niter = solver.minimize(fun, x, fx, lb, ub);
-
-    spdlog::info("Optimization terminated in {} iterations", niter);
-    std::cout << "nu: " << x[0] << " phi: " << x[1] << std::endl;
-
-    model.parameters[0] = x[0];
-    model.parameters[1] = x[1];
-    for (size_t i = 0; i < t.num_nodes; ++i) {
-        t.branch_lengths[i] = x[i + 2];
+        params[i + 2] = t.branch_lengths[i];
     }
 
-    model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
-    likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
-    double llh_after = 0.0;
-    for (size_t character = 0; character < data.num_characters; ++character) {
-        llh_after += likelihood[character];
+    int MAX_EM_ITERATIONS = 100;
+    double EM_STOPPING_CRITERION = 1e-5;
+    for (int i = 0; i < MAX_EM_ITERATIONS; i++) {
+        auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+        phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
+        phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+
+        std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+        double leaf_responsibility = 0.0;
+        laml_expectation_step(t, model, likelihood, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+
+        double llh_before = 0.0;
+        for (size_t character = 0; character < data.num_characters; ++character) {
+            llh_before += likelihood[character];
+        }
+
+        spdlog::info("EM iteration: {} Log likelihood: {}", i, llh_before);
+        spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
+        laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
+        
+        double fx;
+        int niter = solver.minimize(fun, params, fx, lb, ub);
+
+        model.parameters[0] = params[0];
+        model.parameters[1] = params[1];
+        for (size_t i = 0; i < t.num_nodes; ++i) {
+            t.branch_lengths[i] = params[i + 2];
+        }
+
+        // update model parameters
+        model_data = model.initialize_data(&internal_comp_buffer, t.branch_lengths);
+        likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+
+        double llh_after = 0.0;
+        for (size_t character = 0; character < data.num_characters; ++character) {
+            llh_after += likelihood[character];
+        }
+
+        if (abs(llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
+            break;
+        }
     }
 
-    spdlog::info("Log likelihood before: {}", llh_before);
-    spdlog::info("Log likelihood after: {}", llh_after);
     return 0.0;
 }
 
