@@ -26,6 +26,76 @@
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
 
+struct nni { // swap subtrees rooted at u and v
+    int u;
+    int v;
+};
+
+std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
+    const phylogeny_data& data,
+    const tree& initial_tree, // tree MUST be binary,
+    int threads = 1
+) {
+    // compute initial likelihood and parameter estimates
+    tree t                  = initial_tree;
+    laml_model model        = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
+    auto initial_em_results = laml_expectation_maximization(t, model);
+    spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
+    std::vector<nni> nni_moves;
+    for (int node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
+            continue;
+        }
+
+        int p_id = t.tree.predecessors(node_id)[0];
+        int w_id = t.tree.successors(p_id)[0];
+        if (w_id == node_id) {
+            w_id = t.tree.successors(p_id)[1];
+        }
+
+        for (int u_id : t.tree.successors(node_id)) {
+            nni_moves.push_back({node_id, u_id});
+        }
+    }
+
+    // invariant: 
+    //   t does not change. specifically, at end of each iteration, 
+    //   t is the initial tree
+    std::vector<std::pair<nni, double>> neighborhood;
+    for (const nni& move : nni_moves) {
+        auto branch_lengths_copy = t.branch_lengths;
+        auto params_copy = model.parameters;
+
+        // perform NNI move
+        auto [u, v] = move;
+        int parent_u = t.tree.predecessors(u)[0];
+        int parent_v = t.tree.predecessors(v)[0];
+
+        t.tree.remove_edge(parent_u, u);
+        t.tree.remove_edge(parent_v, v);
+        t.tree.add_edge(parent_u, v);
+        t.tree.add_edge(parent_v, u);
+
+        auto em_result = laml_expectation_maximization(t, model);
+        neighborhood.push_back({move, em_result.log_likelihood});
+
+        spdlog::info("NNI move: ({}, {}) -> ({}, {}), LLH: {}, EM Iterations: {}", 
+            parent_u, u, parent_v, v, em_result.log_likelihood, em_result.num_iterations);
+
+        // revert NNI move
+        t.tree.remove_edge(parent_u, v);
+        t.tree.remove_edge(parent_v, u);
+        t.tree.add_edge(parent_u, u);
+        t.tree.add_edge(parent_v, v);
+
+        // revert model parameters
+        t.branch_lengths = branch_lengths_copy;
+        model.parameters = params_copy;
+    }
+
+    return neighborhood;
+}
+
 int main(int argc, char ** argv) {
     auto console_logger = spdlog::stdout_color_mt("fastlaml");
     auto error_logger = spdlog::stderr_color_mt("error");
@@ -102,14 +172,12 @@ int main(int argc, char ** argv) {
         program.get<std::string>("--mutation-priors")
     );
     
-    
     auto start = std::chrono::high_resolution_clock::now();
-    auto model = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
-    double llh = laml_expectation_maximization(t, model, true);
+    std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t);
     auto end = std::chrono::high_resolution_clock::now();
     double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    spdlog::info("Log likelihood: {}", llh);
+    //spdlog::info("Log likelihood: {}", llh);
     spdlog::info("Computation time: {} ms", runtime);
 
     return 0;

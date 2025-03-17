@@ -68,6 +68,17 @@ public:
     }
 
     /*!
+     * @brief Removes a directed edge from vertex u to vertex v.
+     * 
+     * @param u The ID of the source vertex.
+     * @param v The ID of the destination vertex.
+     */
+    void remove_edge(int u, int v) {
+        succ[u].erase(std::remove(succ[u].begin(), succ[u].end(), v), succ[u].end());
+        pred[v].erase(std::remove(pred[v].begin(), pred[v].end(), u), pred[v].end());
+    }
+
+    /*!
      * @brief Returns the number of vertices in the graph.
      * 
      * @return size_t The number of vertices.

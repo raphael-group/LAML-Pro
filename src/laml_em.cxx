@@ -9,9 +9,12 @@
 #include "math_utilities.h"
 #include "phylogeny.h"
 #include "models/laml.h"
+#include "laml_em.h"
 
+#pragma GCC diagnostic push 
 #include "extern/LBFGSB.h"
 #include "extern/LBFGS.h"
+#pragma GCC diagnostic pop
 
 using Eigen::VectorXd;
 using namespace LBFGSpp;
@@ -199,10 +202,11 @@ void laml_expectation_step(
     } 
 }
 
-double laml_expectation_maximization(
+em_results laml_expectation_maximization(
     tree& t, 
     laml_model& model,
-    bool verbose = false
+    int max_em_iterations,
+    bool verbose
 ) {
     int num_nodes = t.num_nodes;
     int num_characters = model.alphabet_sizes.size();
@@ -227,8 +231,8 @@ double laml_expectation_maximization(
 
     // set up the L-BFGS solver
     LBFGSParam<double> lbfgs_params;
-    lbfgs_params.epsilon = 1e-3;
-    lbfgs_params.epsilon_rel = 1e-3;
+    lbfgs_params.epsilon = 1e-4;
+    lbfgs_params.epsilon_rel = 1e-4;
     lbfgs_params.max_iterations = 100;
 
     VectorXd params = VectorXd::Zero(t.num_nodes + 2);
@@ -245,9 +249,9 @@ double laml_expectation_maximization(
     }
 
     double llh = 0.0;
-    int MAX_EM_ITERATIONS = 100;
     double EM_STOPPING_CRITERION = 1e-5;
-    for (int i = 0; i < MAX_EM_ITERATIONS; i++) {
+    int i = 0;
+    for (; i < max_em_iterations; i++) {
         auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
         phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
@@ -269,7 +273,16 @@ double laml_expectation_maximization(
         laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
         
         double fx;
-        int niter = solver.minimize(fun, params, fx);
+        try {
+            int niter = solver.minimize(fun, params, fx);
+        } catch (const std::runtime_error &e) {
+            if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
+                std::cout << "HERE" << std::endl;
+                return {llh_before, i};
+            } else {
+                throw;
+            }
+        }
 
         model.parameters[0] = std::exp(params[0]);
         model.parameters[1] = sigmoid(params[1]);
@@ -293,5 +306,5 @@ double laml_expectation_maximization(
         }
     }
 
-    return llh;
+    return {llh, i + 1};
 }

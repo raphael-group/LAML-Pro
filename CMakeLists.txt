@@ -11,6 +11,8 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -pg --coverage")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -funsafe-math-optimizations -march=native")
 
+find_package (Eigen3 3.3 REQUIRED NO_MODULE)
+
 project(fastlaml VERSION 1.0)
 add_subdirectory(src/)
 
@@ -27,4 +29,3 @@ add_subdirectory(third-party/argparse)
 add_subdirectory(third-party/json)
 add_subdirectory(third-party/gcem)
 add_subdirectory(third-party/nanobench)
-add_subdirectory(third-party/eigen)
