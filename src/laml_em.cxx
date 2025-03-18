@@ -277,7 +277,6 @@ em_results laml_expectation_maximization(
             int niter = solver.minimize(fun, params, fx);
         } catch (const std::runtime_error &e) {
             if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
-                std::cout << "HERE" << std::endl;
                 return {llh_before, i};
             } else {
                 throw;

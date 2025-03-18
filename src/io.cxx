@@ -31,6 +31,9 @@ tree parse_newick_tree(std::string fname) {
 
         int id = g.add_vertex(j);
         branch_lengths[j] = tree.get_edge_length(i);
+        if (branch_lengths[j] == 0) {
+            branch_lengths[j] = 1.0;
+        }
         node_names[j] = tree.get_label(i);
         name_map[i] = id;
     }

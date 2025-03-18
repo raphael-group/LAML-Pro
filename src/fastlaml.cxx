@@ -31,38 +31,28 @@ struct nni { // swap subtrees rooted at u and v
     int v;
 };
 
-std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
-    const phylogeny_data& data,
-    const tree& initial_tree, // tree MUST be binary,
-    int threads = 1
-) {
-    // compute initial likelihood and parameter estimates
-    tree t                  = initial_tree;
-    laml_model model        = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
-    auto initial_em_results = laml_expectation_maximization(t, model);
-    spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
+struct nni_thread_data {
+    tree t;
+    laml_model model;
     std::vector<nni> nni_moves;
-    for (int node_id = 0; node_id < t.num_nodes; ++node_id) {
-        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
-            continue;
-        }
+};
 
-        int p_id = t.tree.predecessors(node_id)[0];
-        int w_id = t.tree.successors(p_id)[0];
-        if (w_id == node_id) {
-            w_id = t.tree.successors(p_id)[1];
-        }
-
-        for (int u_id : t.tree.successors(node_id)) {
-            nni_moves.push_back({node_id, u_id});
-        }
-    }
-
-    // invariant: 
-    //   t does not change. specifically, at end of each iteration, 
-    //   t is the initial tree
-    std::vector<std::pair<nni, double>> neighborhood;
+/* 
+    tree t is binary and t and model are not modified.
+*/
+std::vector<std::pair<nni, double>> evaluate_nnis(
+    tree& t,
+    laml_model& model,
+    const std::vector<nni>& nni_moves,
+    std::atomic<int>& nni_counter,
+    int total_nni_moves
+) {
+    std::vector<std::pair<nni, double>> evaluations;
     for (const nni& move : nni_moves) {
+        if (nni_counter % 50 == 1) {
+            spdlog::info("Evaluated {}/{} NNI moves", nni_counter.load(), total_nni_moves);
+        }
+
         auto branch_lengths_copy = t.branch_lengths;
         auto params_copy = model.parameters;
 
@@ -76,11 +66,8 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
         t.tree.add_edge(parent_u, v);
         t.tree.add_edge(parent_v, u);
 
-        auto em_result = laml_expectation_maximization(t, model);
-        neighborhood.push_back({move, em_result.log_likelihood});
-
-        spdlog::info("NNI move: ({}, {}) -> ({}, {}), LLH: {}, EM Iterations: {}", 
-            parent_u, u, parent_v, v, em_result.log_likelihood, em_result.num_iterations);
+        auto em_result = laml_expectation_maximization(t, model, 1);
+        evaluations.push_back({move, em_result.log_likelihood});
 
         // revert NNI move
         t.tree.remove_edge(parent_u, v);
@@ -91,6 +78,71 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
         // revert model parameters
         t.branch_lengths = branch_lengths_copy;
         model.parameters = params_copy;
+        nni_counter++;
+    }
+
+    return evaluations;
+}
+
+std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
+    const phylogeny_data& data,
+    const tree& initial_tree, // tree MUST be binary,
+    int threads = 8
+) {
+    // compute initial likelihood and parameter estimates
+    tree t                  = initial_tree;
+    laml_model model        = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
+    auto initial_em_results = laml_expectation_maximization(t, model);
+    spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
+
+    std::vector<nni> nni_moves;
+    spdlog::info("Root ID: {}", t.root_id);
+    for (int node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
+            continue;
+        }
+
+        int p_id = t.tree.predecessors(node_id)[0];
+        int w_id = t.tree.successors(p_id)[0];
+        if (w_id == node_id) {
+            w_id = t.tree.successors(p_id)[1];
+        }
+
+        for (int u_id : t.tree.successors(node_id)) {
+            nni_moves.push_back({w_id, u_id});
+        }
+    }
+
+    std::vector<std::pair<nni, double>> neighborhood;
+    std::atomic<int> nni_counter(0);
+
+    if (threads <= 1) {
+        neighborhood = evaluate_nnis(t, model, nni_moves, nni_counter, nni_moves.size());
+    } else {
+        std::vector<std::thread> thread_pool;
+        std::vector<std::vector<nni>> thread_nni_moves(threads);
+        std::vector<std::vector<std::pair<nni, double>>> thread_results(threads);
+
+        
+        for (size_t i = 0; i < nni_moves.size(); ++i) {
+            thread_nni_moves[i % threads].push_back(nni_moves[i]);
+        }
+        
+        for (int i = 0; i < threads; ++i) {
+            thread_pool.emplace_back([&, i]() {
+                tree thread_tree = t;
+                laml_model thread_model = model;
+                thread_results[i] = evaluate_nnis(thread_tree, thread_model, thread_nni_moves[i], nni_counter, nni_moves.size());
+            });
+        }
+        
+        for (auto& thread : thread_pool) {
+            thread.join();
+        }
+        
+        for (const auto& result : thread_results) {
+            neighborhood.insert(neighborhood.end(), result.begin(), result.end());
+        }
     }
 
     return neighborhood;
@@ -133,6 +185,11 @@ int main(int argc, char ** argv) {
         .help("Path to the output file")
         .required();
 
+    program.add_argument("--threads")
+        .help("number of threads to use")
+        .default_value(std::thread::hardware_concurrency())
+        .scan<'u', unsigned int>();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -173,11 +230,10 @@ int main(int argc, char ** argv) {
     );
     
     auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t);
+    std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t, program.get<unsigned int>("--threads"));
     auto end = std::chrono::high_resolution_clock::now();
     double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    //spdlog::info("Log likelihood: {}", llh);
     spdlog::info("Computation time: {} ms", runtime);
 
     return 0;
