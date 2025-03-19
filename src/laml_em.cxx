@@ -126,7 +126,6 @@ void laml_expectation_step(
     double& leaf_responsibility
 ) {
     double nu = model.parameters[0];
-    double phi = model.parameters[1];
 
     for (size_t v_id = 0; v_id < t.num_nodes; ++v_id) {
         for (int i = 0; i < 6; i++) responsibilities[v_id][i] = 0.0;
@@ -141,8 +140,8 @@ void laml_expectation_step(
             size_t root = t.tree[t.root_id].data;
             double blen = t.branch_lengths[root];
 
-            model.compute_root_distribution(node_data[root], character, tmp_buffer);
-            double p_zero = tmp_buffer[1];
+            // model.compute_root_distribution(node_data[root], character, tmp_buffer);
+            double p_zero = 0.0; //tmp_buffer[1];
 
             double log_C_zero_zero = p_zero + inside_ll(character, root, 1) - blen * (1.0 + nu)  - likelihoods[character];
             double log_C_zero_miss = p_zero + inside_ll(character, root, 0) + node_data[root].v2 - likelihoods[character];
@@ -232,7 +231,6 @@ em_results laml_expectation_maximization(
     int max_em_iterations,
     bool verbose
 ) {
-    int num_nodes = t.num_nodes;
     int num_characters = model.alphabet_sizes.size();
     int max_alphabet_size = *std::max_element(model.alphabet_sizes.begin(), model.alphabet_sizes.end());
     
@@ -288,7 +286,7 @@ em_results laml_expectation_maximization(
         laml_expectation_step(t, model, likelihood, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
 
         double llh_before = 0.0;
-        for (size_t character = 0; character < num_characters; ++character) {
+        for (int character = 0; character < num_characters; ++character) {
             llh_before += likelihood[character];
         }
 
@@ -301,7 +299,7 @@ em_results laml_expectation_maximization(
 
         double fx;
         try {
-            int niter = solver.minimize(fun, params, fx);
+            solver.minimize(fun, params, fx);
         } catch (const std::runtime_error &e) {
             if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
                 spdlog::warn("Line search failed. Returning current parameters.");
@@ -322,7 +320,7 @@ em_results laml_expectation_maximization(
         likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
 
         double llh_after = 0.0;
-        for (size_t character = 0; character < num_characters; ++character) {
+        for (int character = 0; character < num_characters; ++character) {
             llh_after += likelihood[character];
         }
 

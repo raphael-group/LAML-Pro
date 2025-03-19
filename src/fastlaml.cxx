@@ -133,14 +133,14 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
 
     std::vector<nni> nni_moves;
     spdlog::info("Root ID: {}", t.root_id);
-    for (int node_id = 0; node_id < t.num_nodes; ++node_id) {
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
             continue;
         }
 
         int p_id = t.tree.predecessors(node_id)[0];
         int w_id = t.tree.successors(p_id)[0];
-        if (w_id == node_id) {
+        if (w_id == (int) node_id) {
             w_id = t.tree.successors(p_id)[1];
         }
 
@@ -275,7 +275,7 @@ int main(int argc, char ** argv) {
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist(0.01f, 0.99f);
+        std::uniform_real_distribution<float> dist(0.05f, 0.95f);
         
         double initial_phi = dist(gen);
         double initial_nu = dist(gen);

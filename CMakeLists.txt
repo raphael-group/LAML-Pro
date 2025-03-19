@@ -8,7 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -pg --coverage")
+set(CMAKE_CXX_FLAGS_DEBUG "-g --coverage")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -funsafe-math-optimizations -march=native")
 
 find_package (Eigen3 3.3 REQUIRED NO_MODULE)
