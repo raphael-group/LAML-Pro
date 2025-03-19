@@ -270,7 +270,7 @@ phylogeny_data process_phylogeny_data(
         
         auto& mapping = original_to_new_mappings[character];
         if (mapping.find(orig_state) == mapping.end()) {
-            spdlog::warn("State {} for character {} not found in character matrix", orig_state, character);
+            //spdlog::warn("State {} for character {} not found in character matrix", orig_state, character);
             continue;
         }
         

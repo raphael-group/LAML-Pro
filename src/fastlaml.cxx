@@ -26,6 +26,42 @@
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
 
+template <typename T>
+digraph<T> arbitrarily_resolve_polytomies(
+    digraph<T> tree
+) {
+    digraph<T> binary_tree = tree;
+    int num_nodes = binary_tree.nodes().size();
+    int next_id = num_nodes;
+    
+    for(int node_id = 0; node_id < num_nodes; ++node_id) {
+        std::vector<int> children = binary_tree.successors(node_id);
+        
+        if(children.size() > 2) {
+            for(int child : children) {
+                binary_tree.remove_edge(node_id, child);
+            }
+            
+            binary_tree.add_edge(node_id, children[0]);
+            
+            int current_parent = next_id++;
+            int current_parent_id = binary_tree.add_vertex(current_parent);
+            binary_tree.add_edge(node_id, current_parent_id);
+            binary_tree.add_edge(current_parent_id, children[1]);
+            
+            for(size_t i = 2; i < children.size(); ++i) {
+                int new_node = next_id++;
+                int new_node_id = binary_tree.add_vertex(new_node);
+                binary_tree.add_edge(current_parent_id, new_node_id);
+                binary_tree.add_edge(new_node_id, children[i]);
+                current_parent_id = new_node_id;
+            }
+        }
+    }
+    
+    return binary_tree;
+}
+
 struct nni { // swap subtrees rooted at u and v
     int u;
     int v;
@@ -92,7 +128,7 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
     // compute initial likelihood and parameter estimates
     tree t                  = initial_tree;
     laml_model model        = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
-    auto initial_em_results = laml_expectation_maximization(t, model);
+    auto initial_em_results = laml_expectation_maximization(t, model, 100, true);
     spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
 
     std::vector<nni> nni_moves;
@@ -190,6 +226,11 @@ int main(int argc, char ** argv) {
         .default_value(std::thread::hardware_concurrency())
         .scan<'u', unsigned int>();
 
+    program.add_argument("--mode")
+        .help("Operation mode: 'optimize' for parameter optimization or 'search' for tree search")
+        .default_value(std::string("optimize"))
+        .choices("optimize", "search");
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -217,8 +258,8 @@ int main(int argc, char ** argv) {
     }
     
     if (!is_binary) {
-        spdlog::error("Input tree is not binary. Each node must have exactly 0 or 2 children.");
-        std::exit(1);
+        spdlog::info("Input tree is not binary. Arbitrarily resolving polytomies.");
+        t.tree = arbitrarily_resolve_polytomies(t.tree);
     }
 
     spdlog::info("Processing character matrix and mutation priors...");
@@ -229,12 +270,35 @@ int main(int argc, char ** argv) {
         program.get<std::string>("--mutation-priors")
     );
     
-    auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t, program.get<unsigned int>("--threads"));
-    auto end = std::chrono::high_resolution_clock::now();
-    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (program.get<std::string>("mode") == "optimize") {
+        spdlog::info("Optimizing parameters...");
 
-    spdlog::info("Computation time: {} ms", runtime);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dist(0.01f, 0.99f);
+        
+        double initial_phi = dist(gen);
+        double initial_nu = dist(gen);
+
+        for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+            t.branch_lengths[i] = dist(gen);
+        }
+
+        laml_model model = laml_model(data.character_matrix, data.mutation_priors,initial_phi, initial_nu);
+        laml_expectation_maximization(t, model, 100, true);
+    } else {
+        spdlog::info("Searching for optimal tree...");
+
+        for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+            t.branch_lengths[i] = 0.01 + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(0.4-0.01)));
+        }
+
+        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t, program.get<unsigned int>("--threads"));
+        auto end = std::chrono::high_resolution_clock::now();
+        double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        spdlog::info("Computation time: {} ms", runtime);
+    }    
 
     return 0;
 }

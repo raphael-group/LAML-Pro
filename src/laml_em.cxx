@@ -57,15 +57,17 @@ public:
         gradient.setZero();
 
         for (size_t i = 0; i < responsibilities.size(); ++i) {
-            double blen = std::exp(parameters[i + 2]);
+            double blen = std::exp(parameters[i + 2]) + 1e-6;
 
             double exp_blen     = std::exp(-blen);
             double exp_blen_nu  = std::exp(-blen * nu);
             double log_exp_blen = std::log(1.0 - exp_blen);
 
-            result += -responsibilities[i][0] * blen * (1.0 + nu);
-            dnu    += -responsibilities[i][0] * blen;
-            gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
+            {
+                result += -responsibilities[i][0] * blen * (1.0 + nu);
+                dnu    += -responsibilities[i][0] * blen;
+                gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
+            }
 
             {
                 double log_part = log_exp_blen;
@@ -119,7 +121,7 @@ void laml_expectation_step(
     const likelihood_buffer& inside_ll,
     const likelihood_buffer& outside_ll,
     const likelihood_buffer& edge_inside_ll,
-    const std::vector<laml_data>& node_data,
+    std::vector<laml_data>& node_data,
     std::vector<std::array<double, 6>>& responsibilities,
     double& leaf_responsibility
 ) {
@@ -134,6 +136,28 @@ void laml_expectation_step(
     for (size_t character = 0; character < num_characters; ++character) {
         size_t alphabet_size = model.alphabet_sizes[character];
         std::vector<double> tmp_buffer(alphabet_size - 2, 0.0);
+
+        {
+            size_t root = t.tree[t.root_id].data;
+            double blen = t.branch_lengths[root];
+
+            model.compute_root_distribution(node_data[root], character, tmp_buffer);
+            double p_zero = tmp_buffer[1];
+
+            double log_C_zero_zero = p_zero + inside_ll(character, root, 1) - blen * (1.0 + nu)  - likelihoods[character];
+            double log_C_zero_miss = p_zero + inside_ll(character, root, 0) + node_data[root].v2 - likelihoods[character];
+
+            for (size_t j = 0; j < alphabet_size - 2; j++) {
+                tmp_buffer[j]  = p_zero + inside_ll(character, root, j + 2);
+                tmp_buffer[j] += model.log_mutation_priors[character][j] + node_data[root].v1 - blen * nu;
+                tmp_buffer[j] -= likelihoods[character];
+            }
+            double log_C_zero_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
+
+            responsibilities[root][0] += std::exp(log_C_zero_zero);
+            responsibilities[root][1] += std::exp(log_C_zero_alpha);
+            responsibilities[root][2] += std::exp(log_C_zero_miss);
+        }
 
         for (size_t v_id = 0; v_id < t.num_nodes; ++v_id) {
             if (t.tree.in_degree(v_id) == 0) {
@@ -183,12 +207,12 @@ void laml_expectation_step(
             }
             double log_C_alpha_miss = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
-            responsibilities[v][0] += fast_exp(log_C_zero_zero);
-            responsibilities[v][1] += fast_exp(log_C_zero_alpha);
-            responsibilities[v][2] += fast_exp(log_C_zero_miss);
-            responsibilities[v][3] += fast_exp(log_C_alpha_alpha);
-            responsibilities[v][4] += fast_exp(log_C_alpha_miss);
-            responsibilities[v][5] += fast_exp(log_C_miss_miss);
+            responsibilities[v][0] += std::exp(log_C_zero_zero);
+            responsibilities[v][1] += std::exp(log_C_zero_alpha);
+            responsibilities[v][2] += std::exp(log_C_zero_miss);
+            responsibilities[v][3] += std::exp(log_C_alpha_alpha);
+            responsibilities[v][4] += std::exp(log_C_alpha_miss);
+            responsibilities[v][5] += std::exp(log_C_miss_miss);
         }
     }
 
@@ -231,10 +255,12 @@ em_results laml_expectation_maximization(
 
     // set up the L-BFGS solver
     LBFGSParam<double> lbfgs_params;
-    lbfgs_params.epsilon = 1e-4;
-    lbfgs_params.epsilon_rel = 1e-4;
+    lbfgs_params.m = 20;
+    lbfgs_params.epsilon = 1e-5;
+    lbfgs_params.epsilon_rel = 1e-5;
     lbfgs_params.max_iterations = 100;
-
+    lbfgs_params.max_linesearch = 40;
+    
     VectorXd params = VectorXd::Zero(t.num_nodes + 2);
     LBFGSSolver<double> solver(lbfgs_params);
 
@@ -247,12 +273,13 @@ em_results laml_expectation_maximization(
     for (size_t i = 0; i < t.num_nodes; ++i) {
         params[i + 2] = std::log(t.branch_lengths[i]);
     }
-
+    
     double llh = 0.0;
     double EM_STOPPING_CRITERION = 1e-5;
     int i = 0;
     for (; i < max_em_iterations; i++) {
         auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
         phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
 
@@ -271,13 +298,14 @@ em_results laml_expectation_maximization(
         }
 
         laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
-        
+
         double fx;
         try {
             int niter = solver.minimize(fun, params, fx);
         } catch (const std::runtime_error &e) {
             if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
-                return {llh_before, i};
+                spdlog::warn("Line search failed. Returning current parameters.");
+                throw e;
             } else {
                 throw;
             }
