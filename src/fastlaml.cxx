@@ -296,8 +296,8 @@ int main(int argc, char ** argv) {
         spdlog::info("Searching for optimal tree...");
 
         std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist(0.001f, 1.0f);
+        std::mt19937 gen(73);
+        std::uniform_real_distribution<float> dist(0.05f, 0.5f);
         
         double current_phi = dist(gen);
         double current_nu = dist(gen);
@@ -309,7 +309,7 @@ int main(int argc, char ** argv) {
         auto start = std::chrono::high_resolution_clock::now();
 
         unsigned int max_iterations = 100; // Maximum number of iterations
-        double improvement_threshold = 0.1; // Minimum improvement to continue
+        double improvement_threshold = -10; // Minimum improvement to continue
 
         tree best_tree = t;
         laml_model model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
@@ -324,7 +324,7 @@ int main(int argc, char ** argv) {
         bool improved = true;
         int iteration = 0;
         
-        while (improved && iteration < max_iterations) {
+        while (iteration < max_iterations) {
             iteration++;
             improved = false;
             
@@ -335,41 +335,39 @@ int main(int argc, char ** argv) {
             
             // Find the best NNI move
             nni best_move = {-1, -1};
-            double best_move_likelihood = best_log_likelihood;
+            double best_move_likelihood = -std::numeric_limits<double>::infinity();
             
             for (const auto& [move, log_likelihood] : neighborhood) {
-            if (log_likelihood > best_move_likelihood) {
-                best_move = move;
-                best_move_likelihood = log_likelihood;
-            }
+                if (log_likelihood > best_move_likelihood) {
+                    best_move = move;
+                    best_move_likelihood = log_likelihood;
+                }
             }
             
             // If we found a better move, apply it
             if (best_move.u != -1 && best_move_likelihood > best_log_likelihood + improvement_threshold) {
-            // Apply the NNI move
-            int parent_u = best_tree.tree.predecessors(best_move.u)[0];
-            int parent_v = best_tree.tree.predecessors(best_move.v)[0];
-            
-            best_tree.tree.remove_edge(parent_u, best_move.u);
-            best_tree.tree.remove_edge(parent_v, best_move.v);
-            best_tree.tree.add_edge(parent_u, best_move.v);
-            best_tree.tree.add_edge(parent_v, best_move.u);
-            
-            // Re-optimize parameters with the new topology
-            model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
-            auto result = laml_expectation_maximization(best_tree, model, 100, false);
-            current_nu = model.parameters[0];
-            current_phi = model.parameters[1];
-            
-            double improvement = result.log_likelihood - best_log_likelihood;
-            best_log_likelihood = result.log_likelihood;
-            
-            spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
-                 iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
-            
-            improved = true;
+                int parent_u = best_tree.tree.predecessors(best_move.u)[0];
+                int parent_v = best_tree.tree.predecessors(best_move.v)[0];
+                
+                best_tree.tree.remove_edge(parent_u, best_move.u);
+                best_tree.tree.remove_edge(parent_v, best_move.v);
+                best_tree.tree.add_edge(parent_u, best_move.v);
+                best_tree.tree.add_edge(parent_v, best_move.u);
+                
+                model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+                auto result = laml_expectation_maximization(best_tree, model, 100, false);
+                current_nu = model.parameters[0];
+                current_phi = model.parameters[1];
+                
+                double improvement = result.log_likelihood - best_log_likelihood;
+                best_log_likelihood = result.log_likelihood;
+                
+                spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
+                    iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
+                
+                improved = true;
             } else {
-            spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
+                spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
             }
         }
         
