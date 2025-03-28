@@ -123,11 +123,13 @@ std::vector<std::pair<nni, double>> evaluate_nnis(
 std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
     const phylogeny_data& data,
     const tree& initial_tree, // tree MUST be binary,
-    int threads = 8
+    int threads = 8,
+    double initial_phi = 0.5,
+    double initial_nu = 0.5
 ) {
     // compute initial likelihood and parameter estimates
     tree t                  = initial_tree;
-    laml_model model        = laml_model(data.character_matrix, data.mutation_priors, 0.5, 0.5);
+    laml_model model        = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
     auto initial_em_results = laml_expectation_maximization(t, model, 100, true);
     spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
 
@@ -278,23 +280,28 @@ int main(int argc, char ** argv) {
         std::uniform_real_distribution<float> dist(0.05f, 0.95f);
         
         double initial_phi = dist(gen);
-        double initial_nu = dist(gen);
-
-        for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
-            t.branch_lengths[i] = dist(gen);
-        }
+        double initial_nu  = dist(gen);
 
         laml_model model = laml_model(data.character_matrix, data.mutation_priors,initial_phi, initial_nu);
         laml_expectation_maximization(t, model, 100, true);
     } else {
         spdlog::info("Searching for optimal tree...");
 
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dist(0.001f, 1.0f);
+        
+        double initial_phi = dist(gen);
+        double initial_nu = dist(gen);
+
         for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
-            t.branch_lengths[i] = 0.01 + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(0.4-0.01)));
+            t.branch_lengths[i] = dist(gen);
         }
 
         auto start = std::chrono::high_resolution_clock::now();
-        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(data, t, program.get<unsigned int>("--threads"));
+        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
+            data, t, program.get<unsigned int>("--threads"), initial_nu, initial_phi
+        );
         auto end = std::chrono::high_resolution_clock::now();
         double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         spdlog::info("Computation time: {} ms", runtime);

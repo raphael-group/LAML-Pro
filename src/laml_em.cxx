@@ -57,7 +57,7 @@ public:
         gradient.setZero();
 
         for (size_t i = 0; i < responsibilities.size(); ++i) {
-            double blen = std::exp(parameters[i + 2]) + 1e-6;
+            double blen = std::exp(parameters[i + 2]);
 
             double exp_blen     = std::exp(-blen);
             double exp_blen_nu  = std::exp(-blen * nu);
@@ -146,12 +146,15 @@ void laml_expectation_step(
             double log_C_zero_zero = p_zero + inside_ll(character, root, 1) - blen * (1.0 + nu)  - likelihoods[character];
             double log_C_zero_miss = p_zero + inside_ll(character, root, 0) + node_data[root].v2 - likelihoods[character];
 
-            for (size_t j = 0; j < alphabet_size - 2; j++) {
-                tmp_buffer[j]  = p_zero + inside_ll(character, root, j + 2);
-                tmp_buffer[j] += model.log_mutation_priors[character][j] + node_data[root].v1 - blen * nu;
-                tmp_buffer[j] -= likelihoods[character];
+            double log_C_zero_alpha = -1e10;
+            if (alphabet_size > 2) {
+                for (size_t j = 0; j < alphabet_size - 2; j++) {
+                    tmp_buffer[j]  = p_zero + inside_ll(character, root, j + 2);
+                    tmp_buffer[j] += model.log_mutation_priors[character][j] + node_data[root].v1 - blen * nu;
+                    tmp_buffer[j] -= likelihoods[character];
+                }
+                log_C_zero_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
             }
-            double log_C_zero_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
             responsibilities[root][0] += std::exp(log_C_zero_zero);
             responsibilities[root][1] += std::exp(log_C_zero_alpha);
@@ -184,27 +187,32 @@ void laml_expectation_step(
             double log_C_miss_miss = outside_ll(character, u, 0) + edge_inside_ll(character, w, 0) 
                                    + inside_ll(character, v, 0) - likelihoods[character];
 
-            // compute log_C_zero_alpha
-            for (size_t j = 0; j < alphabet_size - 2; j++) {
-                tmp_buffer[j] = outside_ll(character, u, 1) + edge_inside_ll(character, w, 1) + inside_ll(character, v, j + 2);
-                tmp_buffer[j] += model.log_mutation_priors[character][j] + node_data[v].v1 - blen * nu;
-                tmp_buffer[j] -= likelihoods[character];
-            }
-            double log_C_zero_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
+            double log_C_zero_alpha = -1e10;
+            double log_C_alpha_alpha = -1e10;
+            double log_C_alpha_miss = -1e10;
+            if (alphabet_size > 2) {
+                // compute log_C_zero_alpha
+                for (size_t j = 0; j < alphabet_size - 2; j++) {
+                    tmp_buffer[j] = outside_ll(character, u, 1) + edge_inside_ll(character, w, 1) + inside_ll(character, v, j + 2);
+                    tmp_buffer[j] += model.log_mutation_priors[character][j] + node_data[v].v1 - blen * nu;
+                    tmp_buffer[j] -= likelihoods[character];
+                }
+                log_C_zero_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
-            // compute log_C_alpha_alpha
-            for (size_t j = 0; j < alphabet_size - 2; j++) {
-                tmp_buffer[j] = outside_ll(character, u, j + 2) + edge_inside_ll(character, w, j + 2) + inside_ll(character, v, j + 2) - blen * nu;
-                tmp_buffer[j] -= likelihoods[character];
-            }
-            double log_C_alpha_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
+                // compute log_C_alpha_alpha
+                for (size_t j = 0; j < alphabet_size - 2; j++) {
+                    tmp_buffer[j] = outside_ll(character, u, j + 2) + edge_inside_ll(character, w, j + 2) + inside_ll(character, v, j + 2) - blen * nu;
+                    tmp_buffer[j] -= likelihoods[character];
+                }
+                log_C_alpha_alpha = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
-            // compute log_C_alpha_miss
-            for (size_t j = 0; j < alphabet_size - 2; j++) {
-                tmp_buffer[j] = outside_ll(character, u, j + 2) + edge_inside_ll(character, w, j + 2) + inside_ll(character, v, 0) + node_data[v].v2;
-                tmp_buffer[j] -= likelihoods[character];
+                // compute log_C_alpha_miss
+                for (size_t j = 0; j < alphabet_size - 2; j++) {
+                    tmp_buffer[j] = outside_ll(character, u, j + 2) + edge_inside_ll(character, w, j + 2) + inside_ll(character, v, 0) + node_data[v].v2;
+                    tmp_buffer[j] -= likelihoods[character];
+                }
+                log_C_alpha_miss = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
             }
-            double log_C_alpha_miss = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
 
             responsibilities[v][0] += std::exp(log_C_zero_zero);
             responsibilities[v][1] += std::exp(log_C_zero_alpha);
@@ -257,7 +265,6 @@ em_results laml_expectation_maximization(
     lbfgs_params.epsilon = 1e-5;
     lbfgs_params.epsilon_rel = 1e-5;
     lbfgs_params.max_iterations = 100;
-    lbfgs_params.max_linesearch = 40;
     
     VectorXd params = VectorXd::Zero(t.num_nodes + 2);
     LBFGSSolver<double> solver(lbfgs_params);
