@@ -31,30 +31,38 @@ digraph<T> arbitrarily_resolve_polytomies(
     digraph<T> tree
 ) {
     digraph<T> binary_tree = tree;
-    int num_nodes = binary_tree.nodes().size();
-    int next_id = num_nodes;
     
-    for(int node_id = 0; node_id < num_nodes; ++node_id) {
-        std::vector<int> children = binary_tree.successors(node_id);
-        
-        if(children.size() > 2) {
-            for(int child : children) {
-                binary_tree.remove_edge(node_id, child);
-            }
+    bool has_polytomies = true;
+    while (has_polytomies) {
+        has_polytomies = false;
+
+        int num_nodes = binary_tree.nodes().size();
+        int next_id = num_nodes;
+        for(int node_id = 0; node_id < num_nodes; ++node_id) {
+            std::vector<int> children = binary_tree.successors(node_id);
             
-            binary_tree.add_edge(node_id, children[0]);
-            
-            int current_parent = next_id++;
-            int current_parent_id = binary_tree.add_vertex(current_parent);
-            binary_tree.add_edge(node_id, current_parent_id);
-            binary_tree.add_edge(current_parent_id, children[1]);
-            
-            for(size_t i = 2; i < children.size(); ++i) {
-                int new_node = next_id++;
-                int new_node_id = binary_tree.add_vertex(new_node);
-                binary_tree.add_edge(current_parent_id, new_node_id);
-                binary_tree.add_edge(new_node_id, children[i]);
-                current_parent_id = new_node_id;
+            if(children.size() > 2) {
+                for(int child : children) {
+                    binary_tree.remove_edge(node_id, child);
+                }
+                
+                binary_tree.add_edge(node_id, children[0]);
+                
+                int current_parent = next_id++;
+                int current_parent_id = binary_tree.add_vertex(current_parent);
+                binary_tree.add_edge(node_id, current_parent_id);
+                binary_tree.add_edge(current_parent_id, children[1]);
+                
+                for(size_t i = 2; i < children.size(); ++i) {
+                    int new_node = next_id++;
+                    int new_node_id = binary_tree.add_vertex(new_node);
+                    binary_tree.add_edge(current_parent_id, new_node_id);
+                    binary_tree.add_edge(new_node_id, children[i]);
+                    current_parent_id = new_node_id;
+                }
+
+                has_polytomies = true;
+                break;
             }
         }
     }
@@ -85,7 +93,7 @@ std::vector<std::pair<nni, double>> evaluate_nnis(
 ) {
     std::vector<std::pair<nni, double>> evaluations;
     for (const nni& move : nni_moves) {
-        if (nni_counter % 50 == 1) {
+        if (nni_counter % 100 == 1) {
             spdlog::info("Evaluated {}/{} NNI moves", nni_counter.load(), total_nni_moves);
         }
 
@@ -102,7 +110,7 @@ std::vector<std::pair<nni, double>> evaluate_nnis(
         t.tree.add_edge(parent_u, v);
         t.tree.add_edge(parent_v, u);
 
-        auto em_result = laml_expectation_maximization(t, model, 1);
+        auto em_result = laml_expectation_maximization(t, model, 10);
         evaluations.push_back({move, em_result.log_likelihood});
 
         // revert NNI move
@@ -130,7 +138,7 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
     // compute initial likelihood and parameter estimates
     tree t                  = initial_tree;
     laml_model model        = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
-    auto initial_em_results = laml_expectation_maximization(t, model, 100, true);
+    auto initial_em_results = laml_expectation_maximization(t, model, 100, false);
     spdlog::info("Initial log likelihood: {}", initial_em_results.log_likelihood);
 
     std::vector<nni> nni_moves;
@@ -277,10 +285,10 @@ int main(int argc, char ** argv) {
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist(0.05f, 0.95f);
+        std::uniform_real_distribution<float> dist(0.05f, 0.5f);
         
-        double initial_phi = dist(gen);
-        double initial_nu  = dist(gen);
+        double initial_phi = 0.5;//dist(gen);
+        double initial_nu  = 0.5;// dist(gen);
 
         laml_model model = laml_model(data.character_matrix, data.mutation_priors,initial_phi, initial_nu);
         laml_expectation_maximization(t, model, 100, true);
@@ -291,17 +299,86 @@ int main(int argc, char ** argv) {
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dist(0.001f, 1.0f);
         
-        double initial_phi = dist(gen);
-        double initial_nu = dist(gen);
+        double current_phi = dist(gen);
+        double current_nu = dist(gen);
 
         for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
             t.branch_lengths[i] = dist(gen);
         }
 
         auto start = std::chrono::high_resolution_clock::now();
-        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
-            data, t, program.get<unsigned int>("--threads"), initial_nu, initial_phi
-        );
+
+        unsigned int max_iterations = 100; // Maximum number of iterations
+        double improvement_threshold = 0.1; // Minimum improvement to continue
+
+        tree best_tree = t;
+        laml_model model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+        auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
+        double best_log_likelihood = initial_result.log_likelihood;
+        
+        current_nu = model.parameters[0];
+        current_phi = model.parameters[1];
+        
+        spdlog::info("Starting hill climbing with initial log likelihood: {}", best_log_likelihood);
+        
+        bool improved = true;
+        int iteration = 0;
+        
+        while (improved && iteration < max_iterations) {
+            iteration++;
+            improved = false;
+            
+            // Evaluate entire NNI neighborhood
+            std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
+                data, best_tree, program.get<unsigned int>("--threads"), current_phi, current_nu
+            );
+            
+            // Find the best NNI move
+            nni best_move = {-1, -1};
+            double best_move_likelihood = best_log_likelihood;
+            
+            for (const auto& [move, log_likelihood] : neighborhood) {
+            if (log_likelihood > best_move_likelihood) {
+                best_move = move;
+                best_move_likelihood = log_likelihood;
+            }
+            }
+            
+            // If we found a better move, apply it
+            if (best_move.u != -1 && best_move_likelihood > best_log_likelihood + improvement_threshold) {
+            // Apply the NNI move
+            int parent_u = best_tree.tree.predecessors(best_move.u)[0];
+            int parent_v = best_tree.tree.predecessors(best_move.v)[0];
+            
+            best_tree.tree.remove_edge(parent_u, best_move.u);
+            best_tree.tree.remove_edge(parent_v, best_move.v);
+            best_tree.tree.add_edge(parent_u, best_move.v);
+            best_tree.tree.add_edge(parent_v, best_move.u);
+            
+            // Re-optimize parameters with the new topology
+            model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+            auto result = laml_expectation_maximization(best_tree, model, 100, false);
+            current_nu = model.parameters[0];
+            current_phi = model.parameters[1];
+            
+            double improvement = result.log_likelihood - best_log_likelihood;
+            best_log_likelihood = result.log_likelihood;
+            
+            spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
+                 iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
+            
+            improved = true;
+            } else {
+            spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
+            }
+        }
+        
+        spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
+                 iteration, best_log_likelihood);
+        
+        // Save the best tree
+        t = best_tree;
+
         auto end = std::chrono::high_resolution_clock::now();
         double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         spdlog::info("Computation time: {} ms", runtime);

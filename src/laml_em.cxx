@@ -265,6 +265,7 @@ em_results laml_expectation_maximization(
     lbfgs_params.epsilon = 1e-5;
     lbfgs_params.epsilon_rel = 1e-5;
     lbfgs_params.max_iterations = 100;
+    lbfgs_params.max_linesearch = 40;
     
     VectorXd params = VectorXd::Zero(t.num_nodes + 2);
     LBFGSSolver<double> solver(lbfgs_params);
@@ -310,7 +311,7 @@ em_results laml_expectation_maximization(
         } catch (const std::runtime_error &e) {
             if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
                 spdlog::warn("Line search failed. Returning current parameters.");
-                throw e;
+                //throw e;
             } else {
                 throw;
             }
