@@ -11,8 +11,8 @@
  * Flags to enable fast math functions, 
  * slightly altering likelihood calculations 
  */
-#define FAST_LOG 1
-#define FAST_EXP 1
+#define FAST_LOG 0
+#define FAST_EXP 0
 
 #define TABLE_SIZE 1000000
 
