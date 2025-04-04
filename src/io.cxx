@@ -52,6 +52,37 @@ tree parse_newick_tree(std::string fname) {
     return {num_leaves, num_nodes, (size_t) root_id, g, branch_lengths, node_names};
 }
 
+std::string write_newick_tree(const tree& t) {
+    std::function<std::string(size_t)> recursive_write = [&](size_t node) -> std::string {
+        auto& g = t.tree;
+        std::string result = "";
+        
+        std::vector<size_t> children;
+        for (auto child : g.successors(node)) {
+            children.push_back(child);
+        }
+        
+        if (!children.empty()) {
+            result += "(";
+            for (size_t i = 0; i < children.size(); ++i) {
+                if (i > 0) result += ",";
+                result += recursive_write(children[i]);
+            }
+            result += ")";
+        }
+        
+        int node_id = g[node].data;
+        if (!t.node_names[node_id].empty()) {
+            result += t.node_names[node_id];
+        }
+        
+        result += ":" + std::to_string(t.branch_lengths[node_id]);
+        return result;
+    };
+    
+    return recursive_write(t.root_id) + ";";
+}
+
 /*!
  * @brief Parse a character matrix from a CSV file.
  * @param filename Path to the CSV file

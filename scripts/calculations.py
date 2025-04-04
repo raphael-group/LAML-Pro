@@ -480,7 +480,7 @@ def compute_log_likelihood(
 
     return inside_root_llh[:, 0].sum()
 
-@jax.jit
+#@jax.jit
 def compute_E_step(
     branch_lengths : jnp.array,
     mutation_priors : jnp.array,

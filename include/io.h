@@ -27,6 +27,13 @@ struct phylogeny_data {
 tree parse_newick_tree(std::string fname);
 
 /*!
+ * @brief Write a tree in Newick format.
+ * @param t The tree to write.
+ * @return std::string The Newick representation of the tree.
+ */
+std::string write_newick_tree(const tree& t);
+
+/*!
  * @brief Parse a character matrix from a CSV file.
  * @param filename Path to the CSV file
  * @return Pair of (taxa_names, matrix) where matrix[i][j] is the state for taxon i, character j

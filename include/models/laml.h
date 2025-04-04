@@ -5,7 +5,8 @@
 #include "../phylogenetic_model.h"
 
 /* 
- * Precomputed values and buffers for the LAML model.
+ * Precomputed per-node values and buffers in the LAML model. Avoids recomputation
+ * of these values across characters, since they are constant for a given branch length.
  */
 struct laml_data {
     std::vector<double> *buffer;

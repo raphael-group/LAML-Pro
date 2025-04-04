@@ -289,6 +289,19 @@ def main(mode, phylo_opt):
                 phylo.root
             )
 
+        calc.compute_E_step(
+            phylo_opt.branch_lengths,
+            phylo.mutation_priors,
+            ds["leaves"],
+            ds["internal_postorder"],
+            ds["internal_postorder_children"],
+            ds["parent_sibling"],
+            ds["level_order"],
+            phylo_opt.inside_log_likelihoods,
+            phylo_opt.model_parameters,
+            phylo.character_matrix,
+            phylo.root
+        )
         llh_helper = jax.jit(llh_helper)
         llh_helper().block_until_ready()
         NUM_ITER = 200

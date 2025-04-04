@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <chrono>
+#include <nlohmann/json.hpp>
 
 #include "digraph.h"
 #include "io.h"
@@ -26,6 +27,171 @@
 
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
+
+using json = nlohmann::json;
+
+void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
+    spdlog::info("Optimizing model parameters and branch lengths...");
+
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<float> dist(0.05f, 0.95f);
+    
+    double initial_phi = dist(gen);
+    double initial_nu = dist(gen);
+    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+    auto em_res = laml_expectation_maximization(t, model, 100, true);
+
+    auto newick_tree = write_newick_tree(t);
+    std::ofstream output_file(output_prefix + "_tree.newick");
+    if (output_file.is_open()) {
+        output_file << newick_tree;
+        output_file.close();
+        spdlog::info("Optimized tree written to {}", output_prefix + "_tree.newick");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
+    }
+
+    json output_json;
+    output_json["phi"] = model.parameters[1];
+    output_json["nu"] = model.parameters[0];
+    output_json["em_iterations"] = em_res.num_iterations;
+    output_json["log_likelihood"] = em_res.log_likelihood;
+
+    std::ofstream json_file(output_prefix + "_results.json");
+    if (json_file.is_open()) {
+        json_file << output_json.dump(4);
+        json_file.close();
+        spdlog::info("Optimization results written to {}", output_prefix + "_results.json");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_results.json");
+    }
+
+    spdlog::info("Optimization completed. Log likelihood: {}", em_res.log_likelihood);
+}
+
+void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed, unsigned int num_threads, std::string output_prefix) {
+    spdlog::info("Searching for optimal tree...");
+
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<float> dist(0.05f, 0.95f);
+    
+    double current_phi = dist(gen);
+    double current_nu = dist(gen);
+
+    for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+        t.branch_lengths[i] = dist(gen);
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    unsigned int max_iterations = 100; // Maximum number of iterations
+
+    tree best_tree = t;
+    laml_model model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+    auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
+    double best_log_likelihood = initial_result.log_likelihood;
+    
+    current_nu = model.parameters[0];
+    current_phi = model.parameters[1];
+    
+    spdlog::info("Starting hill climbing with initial log likelihood: {}", best_log_likelihood);
+    
+    bool improved = true;
+    size_t iteration = 0;
+
+    std::function<double(tree& t, laml_model& model)> scoring_function = [&](tree& t, laml_model& model) {
+        auto blens = t.branch_lengths;
+        auto params = model.parameters;
+        double score = laml_expectation_maximization(t, model, 100, false).log_likelihood;
+        t.branch_lengths = blens;
+        model.parameters = params;
+        return score;
+    };
+
+    while (iteration < max_iterations && improved) {
+        iteration++;
+        improved = false;
+        
+        // Evaluate entire NNI neighborhood
+        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
+            scoring_function, best_tree, model, num_threads
+        );
+        
+        // Find the best NNI move
+        nni best_move = {-1, -1};
+        double best_move_likelihood = -std::numeric_limits<double>::infinity();
+        
+        for (const auto& [move, log_likelihood] : neighborhood) {
+            if (log_likelihood > best_move_likelihood) {
+                best_move = move;
+                best_move_likelihood = log_likelihood;
+            }
+        }
+        
+        // If we found a better move, apply it
+        if (best_move.u != -1 && best_move_likelihood >= best_log_likelihood + 1e-4) {
+            int parent_u = best_tree.tree.predecessors(best_move.u)[0];
+            int parent_v = best_tree.tree.predecessors(best_move.v)[0];
+            
+            best_tree.tree.remove_edge(parent_u, best_move.u);
+            best_tree.tree.remove_edge(parent_v, best_move.v);
+            best_tree.tree.add_edge(parent_u, best_move.v);
+            best_tree.tree.add_edge(parent_v, best_move.u);
+            
+            model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+            auto result = laml_expectation_maximization(best_tree, model, 100, false);
+            current_nu = model.parameters[0];
+            current_phi = model.parameters[1];
+            
+            double improvement = result.log_likelihood - best_log_likelihood;
+            best_log_likelihood = result.log_likelihood;
+            
+            spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
+                iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
+            
+            improved = true;
+        } else {
+            spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
+        }
+    }
+    
+    spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
+             iteration, best_log_likelihood);
+    
+    // Save the best tree
+    t = best_tree;
+
+    auto end = std::chrono::high_resolution_clock::now();
+    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    spdlog::info("Total runtime: {} ms", runtime);
+
+    spdlog::info("Writing best tree to file...");
+    std::string newick_tree = write_newick_tree(t);
+    std::ofstream output_file(output_prefix + "_tree.newick");
+    if (output_file.is_open()) {
+        output_file << newick_tree;
+        output_file.close();
+        spdlog::info("Best tree written to {}", output_prefix + "_tree.newick");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
+    }
+
+    json output_json;
+    output_json["phi"] = current_phi;
+    output_json["nu"] = current_nu;
+    output_json["log_likelihood"] = best_log_likelihood;
+    output_json["hill_climbing_iterations"] = iteration;
+    output_json["hill_climbing_runtime"] = runtime;
+
+    std::ofstream json_file(output_prefix + "_results.json");
+    if (json_file.is_open()) {
+        json_file << output_json.dump(4);
+        json_file.close();
+        spdlog::info("Search results written to {}", output_prefix + "_results.json");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_results.json");
+    }
+}
 
 int main(int argc, char ** argv) {
     auto console_logger = spdlog::stdout_color_mt("fastlaml");
@@ -74,6 +240,11 @@ int main(int argc, char ** argv) {
         .default_value(std::string("optimize"))
         .choices("optimize", "search");
 
+    program.add_argument("--seed")
+        .help("Random seed for reproducibility")
+        .default_value(73U)
+        .scan<'u', unsigned int>();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -113,115 +284,14 @@ int main(int argc, char ** argv) {
         program.get<std::string>("--mutation-priors")
     );
     
-    if (program.get<std::string>("mode") == "optimize") {
-        spdlog::info("Optimizing parameters...");
-
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist(0.05f, 0.5f);
-        
-        double initial_phi = 0.5;//dist(gen);
-        double initial_nu  = 0.5;// dist(gen);
-
-        laml_model model = laml_model(data.character_matrix, data.mutation_priors,initial_phi, initial_nu);
-        laml_expectation_maximization(t, model, 100, true);
+    unsigned int seed = program.get<unsigned int>("--seed");
+    std::string mode = program.get<std::string>("--mode");
+    
+    if (mode == "optimize") {
+        optimize_parameters(t, data, seed, program.get<std::string>("--output"));
     } else {
-        spdlog::info("Searching for optimal tree...");
-
-        std::random_device rd;
-        std::mt19937 gen(73);
-        std::uniform_real_distribution<float> dist(0.05f, 0.5f);
-        
-        double current_phi = dist(gen);
-        double current_nu = dist(gen);
-
-        for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
-            t.branch_lengths[i] = dist(gen);
-        }
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        unsigned int max_iterations = 100; // Maximum number of iterations
-
-        tree best_tree = t;
-        laml_model model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
-        auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
-        double best_log_likelihood = initial_result.log_likelihood;
-        
-        current_nu = model.parameters[0];
-        current_phi = model.parameters[1];
-        
-        spdlog::info("Starting hill climbing with initial log likelihood: {}", best_log_likelihood);
-        
-        bool improved = true;
-        size_t iteration = 0;
-
-        std::function<double(tree& t, laml_model& model)> scoring_function = [&](tree& t, laml_model& model) {
-            auto blens = t.branch_lengths;
-            auto params = model.parameters;
-            double score = laml_expectation_maximization(t, model, 100, false).log_likelihood;
-            t.branch_lengths = blens;
-            model.parameters = params;
-            return score;
-        };
-
-        while (iteration < max_iterations && improved) {
-            iteration++;
-            improved = false;
-            
-            // Evaluate entire NNI neighborhood
-            std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
-                scoring_function, best_tree, model, program.get<unsigned int>("--threads"), current_phi, current_nu
-            );
-            
-            // Find the best NNI move
-            nni best_move = {-1, -1};
-            double best_move_likelihood = -std::numeric_limits<double>::infinity();
-            
-            for (const auto& [move, log_likelihood] : neighborhood) {
-                if (log_likelihood > best_move_likelihood) {
-                    best_move = move;
-                    best_move_likelihood = log_likelihood;
-                }
-            }
-            
-            // If we found a better move, apply it
-            if (best_move.u != -1 && best_move_likelihood >= best_log_likelihood + 1e-3) {
-                int parent_u = best_tree.tree.predecessors(best_move.u)[0];
-                int parent_v = best_tree.tree.predecessors(best_move.v)[0];
-                
-                best_tree.tree.remove_edge(parent_u, best_move.u);
-                best_tree.tree.remove_edge(parent_v, best_move.v);
-                best_tree.tree.add_edge(parent_u, best_move.v);
-                best_tree.tree.add_edge(parent_v, best_move.u);
-                
-                model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
-                auto result = laml_expectation_maximization(best_tree, model, 100, false);
-                current_nu = model.parameters[0];
-                current_phi = model.parameters[1];
-                
-                double improvement = result.log_likelihood - best_log_likelihood;
-                best_log_likelihood = result.log_likelihood;
-                
-                spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
-                    iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
-                
-                improved = true;
-            } else {
-                spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
-            }
-        }
-        
-        spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
-                 iteration, best_log_likelihood);
-        
-        // Save the best tree
-        t = best_tree;
-
-        auto end = std::chrono::high_resolution_clock::now();
-        double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        spdlog::info("Computation time: {} ms", runtime);
-    }    
+        search_optimal_tree(t, data, seed, program.get<unsigned int>("--threads"), program.get<std::string>("--output"));
+    }
 
     return 0;
 }

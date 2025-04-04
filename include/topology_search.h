@@ -8,7 +8,11 @@
 #include "phylogeny.h"
 #include <spdlog/spdlog.h>
 
-struct nni { // swap subtrees rooted at u and v
+/* 
+ * Defines an NNI operation which swaps
+ * the subtrees rooted at u and v.
+ */
+struct nni {
     int u;
     int v;
 };
@@ -61,14 +65,29 @@ std::vector<std::pair<nni, double>> evaluate_nnis(
     return evaluations;
 }
 
+/**
+ * @brief Evaluates the nearest neighbor interchange (NNI) neighborhood of a given tree.
+ * 
+ * This function computes scores for every possible NNI move from the initial tree.
+ * NNI moves are topological changes to the tree that involve swapping subtrees.
+ * 
+ * @tparam D The type of the evolutionary model.
+ * @param scoring_function A function that computes a score (e.g., log-likelihood) for a tree and model.
+ *                         Must not alter branch lengths or model parameters.
+ * @param initial_tree The starting tree topology. Must be binary (each internal node has exactly two children).
+ * @param initial_model The initial model parameters.
+ * @param threads Number of threads to use for parallel evaluation. If <= 1, runs sequentially.
+ * 
+ * @return A vector of pairs, each containing an NNI move and its corresponding score.
+ *         Higher scores typically indicate better tree topologies (e.g., when scoring_function 
+ *         returns log-likelihood values).
+ */
 template<typename D>
 std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
     const std::function<double(tree&, D&)>& scoring_function, // does not alter branch lengths or model parameters
     const tree& initial_tree, // tree MUST be binary,
-    D& initial_model,
-    int threads = 8,
-    double initial_phi = 0.5,
-    double initial_nu = 0.5
+    const D& initial_model,
+    int threads = 8
 ) {
     // compute initial likelihood and parameter estimates
     tree t  = initial_tree;
