@@ -16,3 +16,6 @@
 [submodule "third-party/gcem"]
 	path = third-party/gcem
 	url = https://github.com/kthohr/gcem
+[submodule "third-party/osqp"]
+	path = third-party/osqp
+	url = git@github.com:osqp/osqp.git

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 
+#include "ultrametric.h"
 #include "digraph.h"
 #include "io.h"
 
@@ -29,6 +30,7 @@
 #define FASTLAML_VERSION_MINOR 0
 
 using json = nlohmann::json;
+
 
 void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
     spdlog::info("Optimizing model parameters and branch lengths...");
@@ -49,6 +51,18 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
         spdlog::info("Optimized tree written to {}", output_prefix + "_tree.newick");
     } else {
         spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
+    }
+
+    spdlog::info("Fitting branch lengths to ultrametric tree...");
+    ultrametric_projection(t);
+    newick_tree = write_newick_tree(t);
+    output_file.open(output_prefix + "_ultrametric_tree.newick");
+    if (output_file.is_open()) {
+        output_file << newick_tree;
+        output_file.close();
+        spdlog::info("Ultrametric tree written to {}", output_prefix + "_ultrametric_tree.newick");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_ultrametric_tree.newick");
     }
 
     json output_json;
@@ -176,6 +190,18 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
         spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
     }
 
+    spdlog::info("Fitting branch lengths to ultrametric tree...");
+    ultrametric_projection(t);
+    newick_tree = write_newick_tree(t);
+    output_file.open(output_prefix + "_ultrametric_tree.newick");
+    if (output_file.is_open()) {
+        output_file << newick_tree;
+        output_file.close();
+        spdlog::info("Ultrametric tree written to {}", output_prefix + "_ultrametric_tree.newick");
+    } else {
+        spdlog::error("Could not open file for writing: {}", output_prefix + "_ultrametric_tree.newick");
+    }
+
     json output_json;
     output_json["phi"] = current_phi;
     output_json["nu"] = current_nu;
@@ -193,7 +219,7 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     }
 }
 
-int main(int argc, char ** argv) {
+int main(int argc, char** argv) {
     auto console_logger = spdlog::stdout_color_mt("fastlaml");
     auto error_logger = spdlog::stderr_color_mt("error");
     spdlog::set_default_logger(console_logger);
@@ -255,7 +281,7 @@ int main(int argc, char ** argv) {
 
     spdlog::info("Loading tree from Newick file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
-    
+
     // Check if tree is binary
     bool is_binary = true;
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
