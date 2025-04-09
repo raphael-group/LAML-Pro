@@ -105,9 +105,6 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
     double best_log_likelihood = initial_result.log_likelihood;
     
-    current_nu = model.parameters[0];
-    current_phi = model.parameters[1];
-    
     spdlog::info("Starting hill climbing with initial log likelihood: {}", best_log_likelihood);
     
     bool improved = true;
@@ -151,17 +148,15 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
             best_tree.tree.remove_edge(parent_v, best_move.v);
             best_tree.tree.add_edge(parent_u, best_move.v);
             best_tree.tree.add_edge(parent_v, best_move.u);
-            
-            model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+        
             auto result = laml_expectation_maximization(best_tree, model, 100, false);
-            current_nu = model.parameters[0];
-            current_phi = model.parameters[1];
             
+            std::cout << best_move_likelihood << " " << result.log_likelihood << std::endl;
             double improvement = result.log_likelihood - best_log_likelihood;
             best_log_likelihood = result.log_likelihood;
             
             spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
-                iteration, best_move.u, best_move.v, best_log_likelihood, improvement, current_phi, current_nu); 
+                iteration, best_move.u, best_move.v, best_log_likelihood, improvement, model.parameters[0], model.parameters[1]); 
             
             improved = true;
         } else {
