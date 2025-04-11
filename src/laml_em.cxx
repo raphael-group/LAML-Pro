@@ -146,7 +146,7 @@ void laml_expectation_step(
             double log_C_zero_zero = p_zero + inside_ll(character, root, 1) - blen * (1.0 + nu)  - likelihoods[character];
             double log_C_zero_miss = p_zero + inside_ll(character, root, 0) + node_data[root].v2 - likelihoods[character];
 
-            double log_C_zero_alpha = -1e10;
+            double log_C_zero_alpha = -1e12;
             if (alphabet_size > 2) {
                 for (size_t j = 0; j < alphabet_size - 2; j++) {
                     tmp_buffer[j]  = p_zero + inside_ll(character, root, j + 2);
@@ -187,9 +187,9 @@ void laml_expectation_step(
             double log_C_miss_miss = outside_ll(character, u, 0) + edge_inside_ll(character, w, 0) 
                                    + inside_ll(character, v, 0) - likelihoods[character];
 
-            double log_C_zero_alpha = -1e10;
-            double log_C_alpha_alpha = -1e10;
-            double log_C_alpha_miss = -1e10;
+            double log_C_zero_alpha = -1e12;
+            double log_C_alpha_alpha = -1e12;
+            double log_C_alpha_miss = -1e12;
             if (alphabet_size > 2) {
                 // compute log_C_zero_alpha
                 for (size_t j = 0; j < alphabet_size - 2; j++) {
@@ -317,6 +317,9 @@ em_results laml_expectation_maximization(
             }
         }
 
+        auto saved_params = model.parameters;
+        auto saved_branch_lengths = t.branch_lengths;
+
         model.parameters[0] = std::exp(params[0]);
         model.parameters[1] = sigmoid(params[1]);
         for (size_t i = 0; i < t.num_nodes; ++i) {
@@ -330,6 +333,13 @@ em_results laml_expectation_maximization(
         double llh_after = 0.0;
         for (int character = 0; character < num_characters; ++character) {
             llh_after += likelihood[character];
+        }
+
+        if (llh_after < llh_before) { // TODO: fix non-monotonicity. this is a hack.
+            model.parameters = saved_params;
+            t.branch_lengths = saved_branch_lengths;
+            llh = llh_before;
+            break;
         }
 
         llh = llh_after;

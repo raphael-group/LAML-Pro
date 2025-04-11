@@ -31,7 +31,6 @@
 
 using json = nlohmann::json;
 
-
 void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
     spdlog::info("Optimizing model parameters and branch lengths...");
 
@@ -83,25 +82,22 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     spdlog::info("Optimization completed. Log likelihood: {}", em_res.log_likelihood);
 }
 
-void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed, unsigned int num_threads, std::string output_prefix) {
-    spdlog::info("Searching for optimal tree...");
+struct hill_climbing_result {
+    tree best_tree;
+    double log_likelihood;
+    size_t iterations;
+};
 
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dist(0.05f, 0.95f);
-    
-    double current_phi = dist(gen);
-    double current_nu = dist(gen);
-
-    for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
-        t.branch_lengths[i] = dist(gen);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    unsigned int max_iterations = 100; // Maximum number of iterations
-
-    tree best_tree = t;
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, current_phi, current_nu);
+hill_climbing_result greedy_hill_climbing(
+    const tree& initial_tree, 
+    const phylogeny_data& data, 
+    double inital_phi, 
+    double initial_nu, 
+    unsigned int max_iterations,
+    unsigned int num_threads
+) {
+    tree best_tree = initial_tree;
+    laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
     auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
     double best_log_likelihood = initial_result.log_likelihood;
     
@@ -151,7 +147,6 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
         
             auto result = laml_expectation_maximization(best_tree, model, 100, false);
             
-            std::cout << best_move_likelihood << " " << result.log_likelihood << std::endl;
             double improvement = result.log_likelihood - best_log_likelihood;
             best_log_likelihood = result.log_likelihood;
             
@@ -167,8 +162,68 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
              iteration, best_log_likelihood);
     
-    // Save the best tree
-    t = best_tree;
+    return {best_tree, best_log_likelihood, iteration};
+}
+
+void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed, unsigned int num_threads, std::string output_prefix) {
+    spdlog::info("Searching for optimal tree...");
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    unsigned int max_iterations = 100; // Maximum number of hill climbing iterations
+
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<float> dist(0.05f, 0.95f);
+
+    // generate candidate trees by stochastically perturbing the initial tree
+    std::vector<std::pair<double, tree>> candidate_trees;
+    for (size_t i = 0; i < 5; ++i) {
+        auto t_copy = t;
+        stochastically_perturb_tree(t_copy, t_copy.num_leaves * 0.20 * i, gen);
+        candidate_trees.push_back({-std::numeric_limits<double>::infinity(), t_copy});
+    }
+
+    // perform IQTree search
+    for (int i = 0; i < 1; i++) {
+        // randomly select and perturb candidate tree
+        int candidate_index = dist(gen) * candidate_trees.size();
+        auto candidate_tree = candidate_trees[candidate_index].second;
+        stochastically_perturb_tree(candidate_tree, candidate_tree.num_leaves * 0.20, gen);
+
+        // randomly select phi and nu
+        double initial_phi = dist(gen);
+        double initial_nu = dist(gen);
+
+        // perform hill climbing
+        auto result = greedy_hill_climbing(candidate_tree, data, initial_phi, initial_nu, max_iterations, num_threads);
+        double previous_ll = candidate_trees[0].first;
+        if (result.log_likelihood > previous_ll) {
+            std::sort(candidate_trees.begin(), candidate_trees.end(), [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+
+            candidate_trees[0] = {result.log_likelihood, result.best_tree};
+            std::sort(candidate_trees.begin(), candidate_trees.end(),[](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+            spdlog::info("Improved log-likelihood from {} to {}.", previous_ll, result.log_likelihood);
+        } else {
+            spdlog::info("No better tree found in this iteration");
+        }
+    }
+    
+    std::sort(candidate_trees.begin(), candidate_trees.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+
+    t = candidate_trees.back().second;
+    double initial_phi = dist(gen);
+    double initial_nu = dist(gen);
+    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+    auto em_res = laml_expectation_maximization(t, model, 100, false);
+    double current_phi = model.parameters[1];
+    double current_nu = model.parameters[0];
+    spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
 
     auto end = std::chrono::high_resolution_clock::now();
     double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -200,9 +255,8 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     json output_json;
     output_json["phi"] = current_phi;
     output_json["nu"] = current_nu;
-    output_json["log_likelihood"] = best_log_likelihood;
-    output_json["hill_climbing_iterations"] = iteration;
-    output_json["hill_climbing_runtime"] = runtime;
+    output_json["log_likelihood"] = em_res.log_likelihood;
+    output_json["runtime"] = runtime;
 
     std::ofstream json_file(output_prefix + "_results.json");
     if (json_file.is_open()) {
