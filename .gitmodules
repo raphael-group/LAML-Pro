@@ -19,3 +19,6 @@
 [submodule "third-party/osqp"]
 	path = third-party/osqp
 	url = git@github.com:osqp/osqp.git
+[submodule "third-party/Catch2"]
+	path = third-party/Catch2
+	url = git@github.com:catchorg/Catch2.git

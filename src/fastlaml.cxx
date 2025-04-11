@@ -170,7 +170,7 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    unsigned int max_iterations = 100; // Maximum number of hill climbing iterations
+    unsigned int max_iterations = 250; // Maximum number of hill climbing iterations
 
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist(0.05f, 0.95f);
@@ -184,7 +184,7 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     }
 
     // perform IQTree search
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 25; i++) {
         // randomly select and perturb candidate tree
         int candidate_index = dist(gen) * candidate_trees.size();
         auto candidate_tree = candidate_trees[candidate_index].second;
