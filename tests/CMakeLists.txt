@@ -1,4 +1,10 @@
-add_executable(fastlaml_tests likelihood_tests.cxx ../src/laml_em.cxx ../src/ultrametric.cxx)
+add_executable(
+    fastlaml_tests 
+    likelihood_tests.cxx 
+    ../src/laml_em.cxx 
+    ../src/ultrametric.cxx 
+    ../src/models/laml.cxx
+)
 
 # add libraries
 target_link_libraries(fastlaml_tests PRIVATE nlohmann_json::nlohmann_json)
