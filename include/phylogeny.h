@@ -189,7 +189,7 @@ void compute_outside_log_likelihood(
     for (size_t character = 0; character < num_characters; character++) {
         size_t alphabet_size = model.alphabet_sizes[character];
         model.compute_root_distribution(node_data[root], character, tmp_buffer_1);
-        model.compute_log_pmatrix_vector_product(node_data[root], character, t.branch_lengths[root], tmp_buffer_1, tmp_buffer_2);
+        model.compute_log_pmatrix_transpose_vector_product(node_data[root], character, t.branch_lengths[root], tmp_buffer_1, tmp_buffer_2);
         for (size_t j = 0; j < alphabet_size; j++) {
             b(character, root, j) = tmp_buffer_2[j];
         }
