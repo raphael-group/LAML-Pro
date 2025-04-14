@@ -84,9 +84,21 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_1", "[insidellh]") {
     phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
     phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
     REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
-    
+
     double expected_llh = -0.20665578828621584;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_2", "[insidellh]") {
@@ -109,6 +121,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_2", "[insidellh]") {
 
     double expected_llh = -2.2495946917551692;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_3", "[insidellh]") {
@@ -131,6 +155,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_3", "[insidellh]") {
 
     double expected_llh = -3.917350291274164;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_4", "[insidellh]") {
@@ -153,6 +189,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_4", "[insidellh]") {
 
     double expected_llh = -3.917350291274164;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_5", "[insidellh]") {
@@ -175,6 +223,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_5", "[insidellh]") {
 
     double expected_llh = -4.4586751457870815;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_6", "[insidellh]") {
@@ -197,6 +257,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_6", "[insidellh]") {
 
     double expected_llh = -4.4586751457870815;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_7", "[insidellh]") {
@@ -219,6 +291,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_7", "[insidellh]") {
 
     double expected_llh = -4.4586751457870815;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_8", "[insidellh]") {
@@ -241,6 +325,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_8", "[insidellh]") {
 
     double expected_llh = -5.0;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_9", "[insidellh]") {
@@ -263,6 +359,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_9", "[insidellh]") {
 
     double expected_llh = -6.513306124309698;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_10", "[insidellh]") {
@@ -285,6 +393,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_10", "[insidellh]") {
 
     double expected_llh = -6.513306124309698;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_11", "[insidellh]") {
@@ -307,6 +427,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_11", "[insidellh]") {
 
     double expected_llh = -6.513306124309698;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_12", "[insidellh]") {
@@ -329,6 +461,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_12", "[insidellh]") {
 
     double expected_llh = -5.97198126969678;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_13", "[insidellh]") {
@@ -351,6 +495,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_13", "[insidellh]") {
 
     double expected_llh = -5.97198126969678;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_14", "[insidellh]") {
@@ -373,6 +529,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_14", "[insidellh]") {
 
     double expected_llh = -5.97198126969678;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_15", "[insidellh]") {
@@ -395,6 +563,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_15", "[insidellh]") {
 
     double expected_llh = -4.658719582178557;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_16", "[insidellh]") {
@@ -417,6 +597,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_16", "[insidellh]") {
 
     double expected_llh = -4.658719582178557;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_17", "[insidellh]") {
@@ -439,6 +631,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_17", "[insidellh]") {
 
     double expected_llh = -2.5980566021648364;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_18", "[insidellh]") {
@@ -461,6 +665,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_18", "[insidellh]") {
 
     double expected_llh = -2.695795750497349;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_19", "[insidellh]") {
@@ -484,6 +700,18 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_19", "[insidellh]") {
     
     double expected_llh = -2.695795750497349;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_20", "[insidellh]") {
@@ -506,4 +734,16 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_20", "[insidellh]") {
 
     double expected_llh = -1.0297894223949402;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
 }

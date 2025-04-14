@@ -67,6 +67,10 @@ log_sum_exp(Iter begin, Iter end)
     if (begin == end) return VT{};
 
     auto max_elem = *std::max_element(begin, end);
+    if (max_elem == -std::numeric_limits<VT>::infinity()) {
+        return max_elem; // fixes issue where all elements are -inf and function returns NaN
+    }
+
     VT sum = VT{0};
     for (auto it = begin; it != end; ++it) {
         #if FAST_EXP
