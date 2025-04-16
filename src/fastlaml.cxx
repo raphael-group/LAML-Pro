@@ -187,7 +187,8 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
 
     // perform hill climbing
     auto result = greedy_hill_climbing(t, data, initial_phi, initial_nu, max_iterations, num_threads);
-
+    t = result.best_tree;
+    
     initial_phi = dist(gen);
     initial_nu = dist(gen);
     laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
