@@ -11,8 +11,6 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS_DEBUG "-g --coverage")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -funsafe-math-optimizations -march=native")
 
-find_package (Eigen3 3.3 REQUIRED NO_MODULE)
-
 project(fastlaml VERSION 1.0)
 
 add_subdirectory(src/)
@@ -25,6 +23,19 @@ target_include_directories(fastlaml_tests PUBLIC "${fastlaml_SOURCE_DIR}/include
 
 # turn off JSON library tests
 set(JSON_BuildTests OFF CACHE INTERNAL "")
+
+include(FetchContent)
+
+FetchContent_Declare(
+  nlopt
+  GIT_REPOSITORY https://github.com/stevengj/nlopt.git
+  GIT_TAG        v2.10.0  # Replace with your desired NLopt version tag
+)
+
+FetchContent_MakeAvailable(nlopt)
+
+target_include_directories(fastlaml PUBLIC ${nlopt_BINARY_DIR})
+target_include_directories(fastlaml_tests PUBLIC ${nlopt_BINARY_DIR})
 
 # compile libraries
 add_subdirectory(third-party/spdlog)

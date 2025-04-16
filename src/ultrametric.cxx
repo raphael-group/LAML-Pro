@@ -47,7 +47,7 @@ void ultrametric_projection(tree& t) {
     std::vector<OSQPInt> P_j;
     std::vector<OSQPFloat> P_x;
 
-    for (int i = 0; i < t.num_nodes; ++i) {
+    for (size_t i = 0; i < t.num_nodes; ++i) {
         P_i.push_back(i);
         P_j.push_back(i);
         P_x.push_back(1.0);
@@ -86,7 +86,7 @@ void ultrametric_projection(tree& t) {
             A_j.push_back(current_node);
             A_x.push_back(1.0);
 
-            if (current_id == t.root_id) {
+            if (current_id == (int) t.root_id) {
                 break;
             }
 

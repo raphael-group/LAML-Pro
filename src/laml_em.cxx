@@ -2,7 +2,6 @@
 #include <array>
 #include <cmath>
 
-#include <Eigen/Core>
 #include <iostream>
 #include <spdlog/spdlog.h>
 
@@ -11,108 +10,91 @@
 #include "models/laml.h"
 #include "laml_em.h"
 
-#pragma GCC diagnostic push 
-#include "extern/LBFGSB.h"
-#include "extern/LBFGS.h"
-#pragma GCC diagnostic pop
+#include <nlopt.hpp>
 
-using Eigen::VectorXd;
-using namespace LBFGSpp;
-
-double sigmoid(double x) {
-    return 1.0 / (1.0 + std::exp(-x));
-}
-
-double logit(double x) {
-    return std::log(x / (1.0 - x));
-}
-
-class laml_m_step_objective
-{
-private:
-    std::vector<std::array<double, 6>> responsibilities;
+struct e_step_data {
+    std::vector<std::array<double, 6>>& responsibilities;
     double leaf_responsibility;
     int num_missing;
     int num_not_missing;
-public:
-    laml_m_step_objective(
-        std::vector<std::array<double, 6>>& responsibilities,
-        double leaf_responsibility,
-        int num_missing,
-        int num_not_missing
-    ) : responsibilities(responsibilities), 
-        leaf_responsibility(leaf_responsibility),
-        num_missing(num_missing), 
-        num_not_missing(num_not_missing) {}
+};
 
-    double operator()(const VectorXd& parameters, VectorXd& gradient)
-    {
-        double nu = std::exp(parameters[0]);
-        double phi = sigmoid(parameters[1]);
+double m_step_objective_and_grad(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
+{
+    e_step_data* m_data = static_cast<e_step_data*>(data);
 
-        double result = 0.0;
-        double dnu = 0.0;
-        double dphi = 0.0;
+    std::vector<std::array<double, 6>>& responsibilities = m_data->responsibilities;
+    double leaf_responsibility = m_data->leaf_responsibility;
+    int num_missing = m_data->num_missing;
+    int num_not_missing = m_data->num_not_missing;
 
-        gradient.setZero();
+    double nu = parameters[0];
+    double phi = parameters[1];
 
-        for (size_t i = 0; i < responsibilities.size(); ++i) {
-            double blen = std::exp(parameters[i + 2]);
+    double result = 0.0;
+    double dnu = 0.0;
+    double dphi = 0.0;
 
-            double exp_blen     = std::exp(-blen);
-            double exp_blen_nu  = std::exp(-blen * nu);
-            double log_exp_blen = std::log(1.0 - exp_blen);
+    for (size_t i = 0; i < gradient.size(); i++) {
+        gradient[i] = 0.0;
+    }
+    
+    for (size_t i = 0; i < responsibilities.size(); ++i) {
+        double blen = parameters[i+2];
 
-            {
-                result += -responsibilities[i][0] * blen * (1.0 + nu);
-                dnu    += -responsibilities[i][0] * blen;
-                gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
-            }
+        double exp_blen     = std::exp(-blen);
+        double exp_blen_nu  = std::exp(-blen * nu);
+        double log_exp_blen = std::log(1.0 - exp_blen);
 
-            {
-                double log_part = log_exp_blen;
-                result += responsibilities[i][1] * (log_part - blen * nu);
-                dnu -= responsibilities[i][1] * blen;
-                double d_log_part = exp_blen / (1.0 - exp_blen);
-                gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
-            }
-
-            {
-                double val = 1.0 - exp_blen_nu;
-                result += (responsibilities[i][2] + responsibilities[i][4]) * std::log(val);
-                double d_nu = (blen * exp_blen_nu) / val;
-                dnu += (responsibilities[i][2] + responsibilities[i][4]) * d_nu;
-                double d_blen = (nu * exp_blen_nu) / val;
-                gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
-            }
-
-            {
-                result += -responsibilities[i][3] * blen * nu;
-                dnu -= responsibilities[i][3] * blen;
-                gradient[i + 2] += -responsibilities[i][3] * nu;
-            }
-
-            gradient[i + 2] *= blen;
+        {
+            result += -responsibilities[i][0] * blen * (1.0 + nu);
+            dnu    += -responsibilities[i][0] * blen;
+            gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
         }
 
         {
-            double a = num_not_missing * std::log(1.0 - phi);
-            double b = (num_missing - leaf_responsibility) * std::log(phi);
-            result += a + b;
-
-            dphi += num_not_missing * (-1.0 / (1.0 - phi));
-            dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
+            double log_part = log_exp_blen;
+            result += responsibilities[i][1] * (log_part - blen * nu);
+            dnu -= responsibilities[i][1] * blen;
+            double d_log_part = exp_blen / (1.0 - exp_blen);
+            gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
         }
 
-        gradient[0] = -dnu * nu;
-        gradient[1] = -dphi * (std::exp(-parameters[1]) / std::pow(1.0 + std::exp(-parameters[1]), 2));
-        for (size_t i = 0; i < responsibilities.size(); ++i) {
-            gradient[i + 2] = -gradient[i + 2];
+        {
+            double val = 1.0 - exp_blen_nu;
+            result += (responsibilities[i][2] + responsibilities[i][4]) * std::log(val);
+            double d_nu = (blen * exp_blen_nu) / val;
+            dnu += (responsibilities[i][2] + responsibilities[i][4]) * d_nu;
+            double d_blen = (nu * exp_blen_nu) / val;
+            gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
         }
 
-        return -result;
+        {
+            result += -responsibilities[i][3] * blen * nu;
+            dnu -= responsibilities[i][3] * blen;
+            gradient[i + 2] += -responsibilities[i][3] * nu;
+        }
+
+        gradient[i + 2] *= blen;
     }
-};
+
+    {
+        double a = num_not_missing * std::log(1.0 - phi);
+        double b = (num_missing - leaf_responsibility) * std::log(phi);
+        result += a + b;
+
+        dphi += num_not_missing * (-1.0 / (1.0 - phi));
+        dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
+    }
+
+    gradient[0] = -dnu;
+    gradient[1] = -dphi;
+    for (size_t i = 0; i < responsibilities.size(); ++i) {
+        gradient[i + 2] = -gradient[i + 2];
+    }
+
+    return -result;
+}
 
 void laml_expectation_step(
     const tree& t,
@@ -259,25 +241,26 @@ em_results laml_expectation_maximization(
     likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
 
-    // set up the L-BFGS solver
-    LBFGSParam<double> lbfgs_params;
-    lbfgs_params.m = 20;
-    lbfgs_params.epsilon = 1e-5;
-    lbfgs_params.epsilon_rel = 1e-5;
-    lbfgs_params.max_iterations = 100;
-    lbfgs_params.max_linesearch = 40;
+    // set up the M-step solver
+    nlopt::opt opt(nlopt::LD_CCSAQ, t.num_nodes + 2);
     
-    VectorXd params = VectorXd::Zero(t.num_nodes + 2);
-    LBFGSSolver<double> solver(lbfgs_params);
+    std::vector<double> params(t.num_nodes + 2);
+    std::vector<double> lb(t.num_nodes + 2, 1e-5);
+    std::vector<double> ub(t.num_nodes + 2, std::numeric_limits<double>::infinity());
+    ub[1] = 1.0 - 1e-5; // phi in [0, 1]
+    
+    opt.set_lower_bounds(lb);
+    opt.set_upper_bounds(ub);
+    opt.set_xtol_rel(1e-7);
 
     // initialize model parameters
     std::vector<double> internal_comp_buffer(max_alphabet_size);
     auto model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
 
-    params[0] = std::log(model.parameters[0]);
-    params[1] = logit(model.parameters[1]);
+    params[0] = model.parameters[0];
+    params[1] = model.parameters[1];
     for (size_t i = 0; i < t.num_nodes; ++i) {
-        params[i + 2] = std::log(t.branch_lengths[i]);
+        params[i + 2] = t.branch_lengths[i];
     }
     
     double llh = 0.0;
@@ -303,27 +286,22 @@ em_results laml_expectation_maximization(
             spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
         }
 
-        laml_m_step_objective fun(responsibilities, leaf_responsibility, num_missing, num_not_missing);
-
         double fx;
         try {
-            solver.minimize(fun, params, fx);
+            e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
+            opt.set_min_objective(m_step_objective_and_grad, &params_data); 
+            opt.optimize(params, fx);
         } catch (const std::runtime_error &e) {
-            if (std::string(e.what()).find("the line search routine failed") != std::string::npos) {
-                spdlog::warn("Line search failed. Returning current parameters.");
-                //throw e;
-            } else {
-                throw;
-            }
+            throw e;
         }
 
         auto saved_params = model.parameters;
         auto saved_branch_lengths = t.branch_lengths;
 
-        model.parameters[0] = std::exp(params[0]);
-        model.parameters[1] = sigmoid(params[1]);
+        model.parameters[0] = params[0];
+        model.parameters[1] = params[1];
         for (size_t i = 0; i < t.num_nodes; ++i) {
-            t.branch_lengths[i] = std::exp(params[i + 2]);
+            t.branch_lengths[i] = params[i + 2];
         }
 
         // update model parameters
@@ -335,11 +313,8 @@ em_results laml_expectation_maximization(
             llh_after += likelihood[character];
         }
 
-        if (llh_after < llh_before) { // TODO: fix non-monotonicity. this is a hack.
-            model.parameters = saved_params;
-            t.branch_lengths = saved_branch_lengths;
-            llh = llh_before;
-            break;
+        if (llh_after < llh_before) { 
+            throw std::runtime_error("LLH decreased in M-step.");
         }
 
         llh = llh_after;

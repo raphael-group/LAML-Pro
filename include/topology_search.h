@@ -33,7 +33,7 @@ void stochastically_perturb_tree(
     for (int i = 0; i < nni_count; ++i) {
         int node_id = dist(gen);
 
-        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
+        if (node_id == (int) t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
             continue;
         }
 
@@ -46,12 +46,11 @@ void stochastically_perturb_tree(
         // choose random child
         std::vector<int> children = t.tree.successors(node_id);
         int u_id = children[dist(gen) % children.size()];
-        nni nni_move = {w_id, u_id};
 
         // perform NNI move
         int parent_u = t.tree.predecessors(u_id)[0];
         int parent_v = t.tree.predecessors(w_id)[0];
-        
+
         t.tree.remove_edge(parent_u, u_id);
         t.tree.remove_edge(parent_v, w_id);
         t.tree.add_edge(parent_u, w_id);

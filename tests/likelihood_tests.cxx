@@ -54,7 +54,7 @@ bool check_inside_outside(
     for (size_t character = 0; character < num_characters; ++character) {
         for (size_t node = 0; node < num_nodes; ++node) {
             std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
-            for (size_t j = 0; j < max_alphabet_size; ++j) {
+            for (int j = 0; j < max_alphabet_size; ++j) {
                 tmp_buffer[j] = inside_ll(character, node, j) + outside_ll(character, node, j);
             }
 

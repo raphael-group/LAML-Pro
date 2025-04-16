@@ -39,6 +39,10 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     
     double initial_phi = dist(gen);
     double initial_nu = dist(gen);
+    for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+        t.branch_lengths[i] = dist(gen);
+    }
+    
     laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
 
