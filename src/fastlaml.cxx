@@ -113,6 +113,7 @@ hill_climbing_result greedy_hill_climbing(
     std::function<double(tree& t, laml_model& model)> scoring_function = [&](tree& t, laml_model& model) {
         auto blens = t.branch_lengths;
         auto params = model.parameters;
+
         double score = laml_expectation_maximization(t, model, 100, false).log_likelihood;
         t.branch_lengths = blens;
         model.parameters = params;
@@ -139,8 +140,9 @@ hill_climbing_result greedy_hill_climbing(
             }
         }
         
+        double tolerance = 0.1;
         // If we found a better move, apply it
-        if (best_move.u != -1 && best_move_likelihood >= best_log_likelihood + 1e-4) {
+        if (best_move.u != -1 && best_move_likelihood >= best_log_likelihood - tolerance) {
             int parent_u = best_tree.tree.predecessors(best_move.u)[0];
             int parent_v = best_tree.tree.predecessors(best_move.v)[0];
             
@@ -179,50 +181,15 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist(0.05f, 0.95f);
 
-    // generate candidate trees by stochastically perturbing the initial tree
-    std::vector<std::pair<double, tree>> candidate_trees;
-    for (size_t i = 0; i < 5; ++i) {
-        auto t_copy = t;
-        stochastically_perturb_tree(t_copy, t_copy.num_leaves * 0.20 * i, gen);
-        candidate_trees.push_back({-std::numeric_limits<double>::infinity(), t_copy});
-    }
-
-    // perform IQTree search
-    for (int i = 0; i < 25; i++) {
-        // randomly select and perturb candidate tree
-        int candidate_index = dist(gen) * candidate_trees.size();
-        auto candidate_tree = candidate_trees[candidate_index].second;
-        stochastically_perturb_tree(candidate_tree, candidate_tree.num_leaves * 0.20, gen);
-
-        // randomly select phi and nu
-        double initial_phi = dist(gen);
-        double initial_nu = dist(gen);
-
-        // perform hill climbing
-        auto result = greedy_hill_climbing(candidate_tree, data, initial_phi, initial_nu, max_iterations, num_threads);
-        double previous_ll = candidate_trees[0].first;
-        if (result.log_likelihood > previous_ll) {
-            std::sort(candidate_trees.begin(), candidate_trees.end(), [](const auto& a, const auto& b) {
-                return a.first < b.first;
-            });
-
-            candidate_trees[0] = {result.log_likelihood, result.best_tree};
-            std::sort(candidate_trees.begin(), candidate_trees.end(),[](const auto& a, const auto& b) {
-                return a.first < b.first;
-            });
-            spdlog::info("Improved log-likelihood from {} to {}.", previous_ll, result.log_likelihood);
-        } else {
-            spdlog::info("No better tree found in this iteration");
-        }
-    }
-    
-    std::sort(candidate_trees.begin(), candidate_trees.end(), [](const auto& a, const auto& b) {
-        return a.first < b.first;
-    });
-
-    t = candidate_trees.back().second;
+    // randomly select phi and nu
     double initial_phi = dist(gen);
     double initial_nu = dist(gen);
+
+    // perform hill climbing
+    auto result = greedy_hill_climbing(t, data, initial_phi, initial_nu, max_iterations, num_threads);
+
+    initial_phi = dist(gen);
+    initial_nu = dist(gen);
     laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
     auto em_res = laml_expectation_maximization(t, model, 100, false);
     double current_phi = model.parameters[1];

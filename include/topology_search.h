@@ -99,6 +99,26 @@ std::vector<std::pair<nni, double>> evaluate_nnis(
     return evaluations;
 }
 
+std::vector<nni> compute_nni_neighborhood(const tree& t) {
+    std::vector<nni> nni_moves;
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
+            continue;
+        }
+
+        int p_id = t.tree.predecessors(node_id)[0];
+        int w_id = t.tree.successors(p_id)[0];
+        if (w_id == (int) node_id) {
+            w_id = t.tree.successors(p_id)[1];
+        }
+
+        for (int u_id : t.tree.successors(node_id)) {
+            nni_moves.push_back({w_id, u_id});
+        }
+    }
+    return nni_moves;
+}
+
 /**
  * @brief Evaluates the nearest neighbor interchange (NNI) neighborhood of a given tree.
  * 
@@ -129,24 +149,9 @@ std::vector<std::pair<nni, double>> evaluate_nni_neighborhood(
     double log_likelihood = scoring_function(t, model);
     spdlog::info("Initial log likelihood: {}", log_likelihood);
 
-    std::vector<nni> nni_moves;
+    std::vector<nni> nni_moves = compute_nni_neighborhood(t);
     spdlog::info("Root ID: {}", t.root_id);
-    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
-        if (node_id == t.root_id || t.tree.out_degree(node_id) == 0) { // skip root and leaves
-            continue;
-        }
-
-        int p_id = t.tree.predecessors(node_id)[0];
-        int w_id = t.tree.successors(p_id)[0];
-        if (w_id == (int) node_id) {
-            w_id = t.tree.successors(p_id)[1];
-        }
-
-        for (int u_id : t.tree.successors(node_id)) {
-            nni_moves.push_back({w_id, u_id});
-        }
-    }
-
+    
     std::vector<std::pair<nni, double>> neighborhood;
     std::atomic<int> nni_counter(0);
 

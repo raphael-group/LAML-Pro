@@ -295,9 +295,6 @@ em_results laml_expectation_maximization(
             throw e;
         }
 
-        auto saved_params = model.parameters;
-        auto saved_branch_lengths = t.branch_lengths;
-
         model.parameters[0] = params[0];
         model.parameters[1] = params[1];
         for (size_t i = 0; i < t.num_nodes; ++i) {
