@@ -1,4 +1,6 @@
 import dendropy
+import dendropy.calculate.phylogeneticdistance as phylodist
+import numpy as np
 import sys
 
 def compute_rfs(reference_fname, tree_fnames):
@@ -16,6 +18,7 @@ def compute_rfs(reference_fname, tree_fnames):
     try:
         reference = dendropy.Tree.get(path=reference_fname, schema='newick')
         reference.deroot()  # Ensure unrooted for RF calculation
+        compute_distance_matrix(reference_fname)
     except Exception as e:
         raise ValueError(f"Error loading reference tree: {str(e)}")
 
@@ -58,6 +61,36 @@ def compute_rfs(reference_fname, tree_fnames):
 
     return results
 
+def compute_distance_matrix(tree_fname):
+    try:
+        tree = dendropy.Tree.get(path=tree_fname, schema='newick')
+        tree.deroot()
+        M = tree.phylogenetic_distance_matrix()
+    except Exception as e:
+        raise ValueError(f"Error loading reference tree: {str(e)}")
+
+    distance_vec = []
+    for t1, t2 in M.distinct_taxon_pair_iter():
+        distance_vec.append((t1.label, t2.label, M.distance(t1, t2)))
+    sorted_distance_vec = sorted(distance_vec)
+    sorted_distance_vec = np.array([x[2] for x in sorted_distance_vec])
+    return sorted_distance_vec
+
+def compute_branch_length_distances(reference_fname, tree_fnames):
+    true_dists = compute_distance_matrix(reference_fname)
+    results = []
+    for tree_path in tree_fnames:
+        inferred_dists = compute_distance_matrix(tree_path)
+        scale_factor = (inferred_dists.T @ inferred_dists) / (inferred_dists.T @ true_dists)
+        dist = np.linalg.norm(true_dists * scale_factor - inferred_dists)
+
+        results.append({
+            'tree': tree_path,
+            'distance': dist
+        })
+
+    return results
+
 def main():
     import argparse
     
@@ -77,9 +110,20 @@ def main():
         '--output', 
         help='Output CSV file (default: print to stdout)'
     )
+    parser.add_argument(
+        '--metric',
+        help='Metric to compute (default: rf)',
+        choices=['rf', 'branch_length_distances']
+    )
     args = parser.parse_args()
 
-    try:
+    if args.metric == 'branch_length_distances':
+        res = compute_branch_length_distances(args.reference, args.trees)
+        print(f"{'Tree':<50} {'Distance':>10}")
+        for r in res:
+            print(f"{r['tree']:<50} {r['distance']:10.6f}")
+        return
+    else:
         results = compute_rfs(args.reference, args.trees)
         
         # Output results
@@ -92,9 +136,6 @@ def main():
             print(f"{'Tree':<50} {'RF Distance':>10} {'Normalized RF':>12}")
             for res in results:
                 print(f"{res['tree']:<50} {res['rf_distance']:10d} {res['normalized_rf_distance']:12.6f}")
-    
-    except ValueError as e:
-        sys.exit(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     main()
