@@ -98,7 +98,9 @@ hill_climbing_result greedy_hill_climbing(
     double inital_phi, 
     double initial_nu, 
     unsigned int max_iterations,
-    unsigned int num_threads
+    unsigned int num_threads,
+    double tolerance = 0.1,
+    double temp = 0.1
 ) {
     tree best_tree = initial_tree;
     laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
@@ -109,6 +111,9 @@ hill_climbing_result greedy_hill_climbing(
     
     bool improved = true;
     size_t iteration = 0;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
 
     std::function<double(tree& t, laml_model& model)> scoring_function = [&](tree& t, laml_model& model) {
         auto blens = t.branch_lengths;
@@ -129,40 +134,43 @@ hill_climbing_result greedy_hill_climbing(
             scoring_function, best_tree, model, num_threads
         );
         
-        // Find the best NNI move
-        nni best_move = {-1, -1};
-        double best_move_likelihood = -std::numeric_limits<double>::infinity();
-        
+        std::vector<std::pair<nni, double>> filtered_neighborhood;
+        std::vector<double> weights;
         for (const auto& [move, log_likelihood] : neighborhood) {
-            if (log_likelihood > best_move_likelihood) {
-                best_move = move;
-                best_move_likelihood = log_likelihood;
+            if (log_likelihood > best_log_likelihood - tolerance) {
+                filtered_neighborhood.push_back({move, log_likelihood});
+                double weight = std::exp((log_likelihood - best_log_likelihood) / temp);
+                weights.push_back(weight);
             }
         }
-        
-        double tolerance = 0.1;
-        // If we found a better move, apply it
-        if (best_move.u != -1 && best_move_likelihood >= best_log_likelihood - tolerance) {
-            int parent_u = best_tree.tree.predecessors(best_move.u)[0];
-            int parent_v = best_tree.tree.predecessors(best_move.v)[0];
-            
-            best_tree.tree.remove_edge(parent_u, best_move.u);
-            best_tree.tree.remove_edge(parent_v, best_move.v);
-            best_tree.tree.add_edge(parent_u, best_move.v);
-            best_tree.tree.add_edge(parent_v, best_move.u);
-        
-            auto result = laml_expectation_maximization(best_tree, model, 100, false);
-            
-            double improvement = result.log_likelihood - best_log_likelihood;
-            best_log_likelihood = result.log_likelihood;
-            
-            spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
-                iteration, best_move.u, best_move.v, best_log_likelihood, improvement, model.parameters[0], model.parameters[1]); 
-            
-            improved = true;
-        } else {
-            spdlog::info("Iteration {}: No improvement found, stopping hill climbing", iteration);
+
+        if (filtered_neighborhood.empty()) {
+            spdlog::info("No valid NNI moves found, stopping hill climbing");
+            break;
         }
+
+        std::discrete_distribution<> dist(weights.begin(), weights.end());
+        auto selected_move_index = dist(gen);
+        auto selected_move = filtered_neighborhood[selected_move_index].first;
+        auto selected_move_likelihood = filtered_neighborhood[selected_move_index].second;
+       
+        int parent_u = best_tree.tree.predecessors(selected_move.u)[0];
+        int parent_v = best_tree.tree.predecessors(selected_move.v)[0];
+        
+        best_tree.tree.remove_edge(parent_u, selected_move.u);
+        best_tree.tree.remove_edge(parent_v, selected_move.v);
+        best_tree.tree.add_edge(parent_u, selected_move.v);
+        best_tree.tree.add_edge(parent_v, selected_move.u);
+    
+        auto result = laml_expectation_maximization(best_tree, model, 100, false);
+        
+        double improvement = result.log_likelihood - best_log_likelihood;
+        best_log_likelihood = result.log_likelihood;
+        
+        spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
+            iteration, selected_move.u, selected_move.v, best_log_likelihood, improvement, model.parameters[0], model.parameters[1]); 
+        
+        improved = true;
     }
     
     spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
@@ -171,12 +179,13 @@ hill_climbing_result greedy_hill_climbing(
     return {best_tree, best_log_likelihood, iteration};
 }
 
-void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed, unsigned int num_threads, std::string output_prefix) {
+void search_optimal_tree(
+    tree& t, const phylogeny_data& data, unsigned int seed, 
+    unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp
+) {
     spdlog::info("Searching for optimal tree...");
 
     auto start = std::chrono::high_resolution_clock::now();
-
-    unsigned int max_iterations = 250; // Maximum number of hill climbing iterations
 
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist(0.05f, 0.95f);
@@ -186,9 +195,9 @@ void search_optimal_tree(tree& t, const phylogeny_data& data, unsigned int seed,
     double initial_nu = dist(gen);
 
     // perform hill climbing
-    auto result = greedy_hill_climbing(t, data, initial_phi, initial_nu, max_iterations, num_threads);
+    auto result = greedy_hill_climbing(t, data, initial_phi, initial_nu, max_iterations, num_threads, 0.1, temp);
     t = result.best_tree;
-    
+
     initial_phi = dist(gen);
     initial_nu = dist(gen);
     laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
@@ -292,6 +301,16 @@ int main(int argc, char** argv) {
         .default_value(73U)
         .scan<'u', unsigned int>();
 
+    program.add_argument("--max-iterations")
+        .help("Maximum number of iterations for hill climbing")
+        .default_value(100U)
+        .scan<'u', unsigned int>();
+
+    program.add_argument("--temp")
+        .help("Temperature for simulated annealing")
+        .default_value(0.1)
+        .scan<'g', double>();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -337,7 +356,13 @@ int main(int argc, char** argv) {
     if (mode == "optimize") {
         optimize_parameters(t, data, seed, program.get<std::string>("--output"));
     } else {
-        search_optimal_tree(t, data, seed, program.get<unsigned int>("--threads"), program.get<std::string>("--output"));
+        search_optimal_tree(
+            t, data, seed, 
+            program.get<unsigned int>("--threads"), 
+            program.get<std::string>("--output"),
+            program.get<unsigned int>("--max-iterations"),
+            program.get<double>("--temp")
+        );
     }
 
     return 0;
