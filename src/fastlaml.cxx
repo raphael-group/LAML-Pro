@@ -90,6 +90,7 @@ struct hill_climbing_result {
     tree best_tree;
     double log_likelihood;
     size_t iterations;
+    std::vector<double> log_likelihoods;
 };
 
 hill_climbing_result greedy_hill_climbing(
@@ -125,6 +126,8 @@ hill_climbing_result greedy_hill_climbing(
         return score;
     };
 
+    std::vector<double> log_likelihoods;
+    log_likelihoods.push_back(best_log_likelihood);
     while (iteration < max_iterations && improved) {
         iteration++;
         improved = false;
@@ -166,7 +169,8 @@ hill_climbing_result greedy_hill_climbing(
         
         double improvement = result.log_likelihood - best_log_likelihood;
         best_log_likelihood = result.log_likelihood;
-        
+        log_likelihoods.push_back(best_log_likelihood);
+
         spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
             iteration, selected_move.u, selected_move.v, best_log_likelihood, improvement, model.parameters[0], model.parameters[1]); 
         
@@ -176,7 +180,7 @@ hill_climbing_result greedy_hill_climbing(
     spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
              iteration, best_log_likelihood);
     
-    return {best_tree, best_log_likelihood, iteration};
+    return {best_tree, best_log_likelihood, iteration, log_likelihoods};
 }
 
 void search_optimal_tree(
@@ -238,6 +242,8 @@ void search_optimal_tree(
     output_json["nu"] = current_nu;
     output_json["log_likelihood"] = em_res.log_likelihood;
     output_json["runtime"] = runtime;
+    output_json["iterations"] = result.iterations;
+    output_json["log_likelihoods"] = result.log_likelihoods;
 
     std::ofstream json_file(output_prefix + "_results.json");
     if (json_file.is_open()) {
@@ -308,7 +314,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("--temp")
         .help("Temperature for simulated annealing")
-        .default_value(0.1)
+        .default_value(0.001)
         .scan<'g', double>();
 
     try {
