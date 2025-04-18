@@ -246,7 +246,7 @@ em_results laml_expectation_maximization(
     
     std::vector<double> params(t.num_nodes + 2);
     std::vector<double> lb(t.num_nodes + 2, 1e-5);
-    std::vector<double> ub(t.num_nodes + 2, std::numeric_limits<double>::infinity());
+    std::vector<double> ub(t.num_nodes + 2, 1e5);
     ub[1] = 1.0 - 1e-5; // phi in [0, 1]
     
     opt.set_lower_bounds(lb);

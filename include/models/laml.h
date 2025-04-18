@@ -53,7 +53,11 @@ class laml_model : public phylogenetic_model<laml_data> {
         for (size_t i = 0; i < mutation_priors.size(); i++) {
             log_mutation_priors[i] = std::vector<double>(mutation_priors[i].size());
             for (size_t j = 0; j < mutation_priors[i].size(); j++) {
-                log_mutation_priors[i][j] = std::log(mutation_priors[i][j]);
+                if (mutation_priors[i][j] == 0.0) {
+                    log_mutation_priors[i][j] = -1e12;
+                } else {
+                    log_mutation_priors[i][j] = std::log(mutation_priors[i][j]);
+                }
             }
         }
     }
