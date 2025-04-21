@@ -81,17 +81,39 @@ void laml_model::compute_taxa_log_inside_likelihood(
     size_t taxa_id,
     std::vector<double>& result
 ) const {
-    int state = this->character_matrix[taxa_id][character];
-    
-    std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
 
-    if (state == -1) {
-        result[0] = 0.0;
-        for (size_t i = 1; i < this->alphabet_sizes[character]; i++) {
-            result[i] = d.log_phi;
+    if (this->data_type == "character-matrix") {
+
+        int state = this->character_matrix[taxa_id][character];
+        
+        std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
+
+        if (state == -1) {
+            result[0] = 0.0; // 0 corresponds to silenced state? log(1.0) = 0
+            for (size_t i = 1; i < this->alphabet_sizes[character]; i++) {
+                result[i] = d.log_phi;
+            }
+        } else {
+            result[state + 1] = d.log_one_minus_phi;
         }
     } else {
-        result[state + 1] = d.log_one_minus_phi;
+        const std::vector<double>& probs = this->observation_matrix[taxa_id][character];  // now a tensor
+
+        std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
+        double sum = std::accumulate(probs.begin(), probs.end(), 0.0);
+
+        if (sum == 0.0) { // Missing observed data case
+            result[0] = 0.0;
+            for (size_t i = 0; i < this->alphabet_sizes[character]; ++i) {
+                result[i+1] = d.log_phi;
+            }
+         } else {
+             // observed data is not missing, result[0] corresponds to missing latent state, initialized to NEGATIVE_INFINITY
+             for (size_t i = 0; i < probs.size(); ++i) {
+                // result[i] = probs[i] + d.log_one_minus_phi; // assumes precomputed
+                result[i+1] = std::log(probs[i]) + d.log_one_minus_phi; // fills in 1-4
+            }
+        }
     }
 };
 

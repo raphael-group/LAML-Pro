@@ -1,4 +1,5 @@
 #include "io.h"
+#include <variant>
 
 #include <spdlog/spdlog.h>
 #include "csv.hpp"
@@ -125,6 +126,78 @@ std::pair<std::vector<std::string>, std::vector<std::vector<int>>> parse_charact
 }
 
 /*!
+ * @brief Parse an observation matrix from a CSV file.
+ * @param filename Path to the CSV file
+ * @return Triplet of (taxa_names, column_names, states) where matrix[i][j][k] is the probability for taxon i, character j and state k
+ */
+std::tuple<
+    std::vector<std::string>, 
+    std::vector<std::pair<int, int>>,
+    std::vector<std::vector<std::vector<double>>> 
+> parse_observation_matrix(const std::string& filename) {
+    std::vector<std::string> taxa_names;
+    std::map<std::string, size_t> taxa_index_map;
+    std::set<std::pair<int, int>> character_key_set;
+    std::vector<std::tuple<std::string, std::pair<int, int>, std::vector<double>>> parsed_rows;
+
+    try {
+        csv::CSVReader reader(filename);
+        
+        for (auto& row: reader) {
+            // column names are hard coded for now @TODO
+            std::string taxon_name = row["cell_name"].get<std::string>();
+            int cassette_idx = static_cast<int>(row["cassette_idx"].get<double>());
+            int target_site = static_cast<int>(row["target_site"].get<double>());
+            std::pair<int, int> character_key = {cassette_idx, target_site};
+            character_key_set.insert(character_key);
+
+            // hard coded to 4 states for now @TODO
+            std::vector<double> state_probs(4, 0.0);
+            state_probs[0] = row["state0_prob"].get<double>();
+            state_probs[1] = row["state1_prob"].get<double>();
+            state_probs[2] = row["state3_prob"].get<double>();
+            state_probs[3] = row["state4_prob"].get<double>();
+
+            parsed_rows.emplace_back(taxon_name, character_key, state_probs);
+            if (taxa_index_map.find(taxon_name) == taxa_index_map.end()) {
+                taxa_index_map[taxon_name] = taxa_names.size(); // quick lookup for taxa index i
+                taxa_names.push_back(taxon_name); // ordered list of taxa
+            }
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to parse character matrix file: " + std::string(e.what()));
+    }
+    
+    if (taxa_names.empty()) {
+        throw std::runtime_error("No data found in character matrix file");
+    }
+
+    std::vector<std::pair<int, int>> character_keys(character_key_set.begin(), character_key_set.end());
+    std::sort(character_keys.begin(), character_keys.end());
+
+    std::map<std::pair<int, int>, size_t> character_index_map;
+    for (size_t j = 0; j < character_keys.size(); ++j) {
+        character_index_map[character_keys[j]] = j;
+    } // for any (cassette_idx, target_site) pair, find the column index j
+
+    // building 3D matrix[i][j][k]
+    std::vector<std::vector<std::vector<double>>> matrix(
+        taxa_names.size(), // num_taxa as rows, num columns (cassette_idx, target_site)
+                           // num state probabilities 
+        std::vector<std::vector<double>>(character_keys.size(), std::vector<double>(4, 0.0))
+    );
+
+    // fill in the matrix
+    for (const auto& [taxon_name, character_key, probs] : parsed_rows) {
+        size_t i = taxa_index_map[taxon_name];
+        size_t j = character_index_map[character_key];
+        matrix[i][j] = probs;
+    }
+    
+    return {taxa_names, character_keys, matrix};
+}
+
+/*!
  * @brief Parse mutation priors from a CSV file.
  * @param filename Path to the CSV file
  * @return Vector of (character, state, probability) tuples
@@ -186,6 +259,43 @@ std::vector<std::tuple<int, int, double>> generate_uniform_priors(
 }
 
 /*!
+ * @brief Generate uniform mutation priors if none are provided
+ * Overloads above function, but tensor-compatible for observation matrix
+ * @param raw_matrix The observation matrix
+ * @param num_characters Number of characters
+ * @return Vector of (character, state, probability) tuples
+ */
+std::vector<std::tuple<int, int, double>> generate_uniform_priors(
+    const std::vector<std::vector<std::vector<double>>>& raw_matrix,
+    size_t num_characters
+) {
+    std::vector<std::tuple<int, int, double>> priors;
+
+    for (size_t c = 0; c < num_characters; ++c) {
+        std::set<int> unique_states;
+
+        for (const auto& row : raw_matrix) {
+            if (c < row.size()) {
+                const auto& probs = row[c];
+                for (size_t s = 0; s < probs.size(); ++s) {
+                    if (probs[s] > 0.0) {
+                        unique_states.insert(static_cast<int>(s));
+                    }
+                }
+            }
+        }
+
+        double probability = 1.0 / unique_states.size();
+        for (int state : unique_states) {
+            priors.emplace_back(c, state, probability);
+        }
+    }
+
+    return priors;
+}
+
+
+/*!
  * @brief Process character matrix and mutation priors to create a phylogeny_data object.
  * @param t The tree structure
  * @param character_matrix_file Path to the character matrix CSV
@@ -194,15 +304,27 @@ std::vector<std::tuple<int, int, double>> generate_uniform_priors(
  */
 phylogeny_data process_phylogeny_data(
     const tree& t, const std::string& character_matrix_file, 
-    const std::string& mutation_priors_file) {
-    
-    auto [taxa_names, raw_matrix] = parse_character_matrix(character_matrix_file);
-    
+    const std::string& mutation_priors_file,
+    const std::string& data_type) {
+  
+    std::vector<std::string> taxa_names;
+    std::vector<std::pair<int, int>> character_keys;
+    std::vector<std::vector<int>> raw_matrix;
+    std::vector<std::vector<std::vector<double>>> raw_tensor_matrix;
+
+    if (data_type == "observation-matrix") { 
+        std::tie(taxa_names, character_keys, raw_tensor_matrix) = parse_observation_matrix(character_matrix_file);
+        throw std::runtime_error("observation-matrix requires a tensor based workflow, which is not yet supported.");
+    } else if (data_type == "character-matrix") {
+        std::tie(taxa_names, raw_matrix) = parse_character_matrix(character_matrix_file);
+    } else {
+        throw std::invalid_argument("Unknown data_type: " + data_type + ". Expected 'character-matrix' or 'observation-matrix'.");
+    }
+
     size_t num_characters = 0;
     for (const auto& row : raw_matrix) {
         num_characters = std::max(num_characters, row.size());
     }
-    
     spdlog::info("Found {} taxa and {} characters", taxa_names.size(), num_characters);
     
     std::vector<std::tuple<int, int, double>> raw_priors;
@@ -210,134 +332,165 @@ phylogeny_data process_phylogeny_data(
         raw_priors = parse_mutation_priors(mutation_priors_file);
     } else {
         spdlog::info("No mutation priors provided. Assuming uniform priors.");
+        // overloaded tensor-compatible method 
         raw_priors = generate_uniform_priors(raw_matrix, num_characters);
     }
-    
-    std::vector<std::vector<int>> character_matrix_recode(raw_matrix.size(), std::vector<int>(num_characters));
-    std::vector<std::map<int, int>> original_to_new_mappings(num_characters);
-    size_t max_alphabet_size = 0;
-    
-    for (size_t c = 0; c < num_characters; ++c) {
-        std::set<int> valid_states;
-        for (const auto& row : raw_matrix) {
-            if (c < row.size() && row[c] > 0) {
-                valid_states.insert(row[c]);
+
+    phylogeny_data result;
+    if (data_type == "character-matrix") {
+        // recode the character matrix
+        std::vector<std::vector<int>> character_matrix_recode(raw_matrix.size(), std::vector<int>(num_characters));
+        // maps original states to new contiguous state indices starting from 1
+        std::vector<std::map<int, int>> original_to_new_mappings(num_characters);
+        size_t max_alphabet_size = 0;
+       
+        // for each column, gather the unique states
+        for (size_t c = 0; c < num_characters; ++c) {
+            std::set<int> valid_states;
+            for (const auto& row : raw_matrix) {
+                if (c < row.size() && row[c] > 0) {
+                    valid_states.insert(row[c]);
+                }
             }
-        }
-        
-        int new_idx = 1;
-        for (int orig_state : valid_states) {
-            original_to_new_mappings[c][orig_state] = new_idx++;
-        }
-        
-        if (valid_states.size() > max_alphabet_size) {
-            max_alphabet_size = valid_states.size();
-        }
-        
-        for (size_t i = 0; i < raw_matrix.size(); ++i) {
-            if (c < raw_matrix[i].size()) {
-                int orig_state = raw_matrix[i][c];
-                if (orig_state > 0 && original_to_new_mappings[c].count(orig_state)) {
-                    character_matrix_recode[i][c] = original_to_new_mappings[c][orig_state];
-                } else if (orig_state == 0) {
-                    character_matrix_recode[i][c] = 0;
+            
+            int new_idx = 1;
+            for (int orig_state : valid_states) {
+                original_to_new_mappings[c][orig_state] = new_idx++;
+            }
+            
+            if (valid_states.size() > max_alphabet_size) {
+                max_alphabet_size = valid_states.size();
+            }
+            
+            for (size_t i = 0; i < raw_matrix.size(); ++i) {
+                if (c < raw_matrix[i].size()) {
+                    int orig_state = raw_matrix[i][c];
+                    if (orig_state > 0 && original_to_new_mappings[c].count(orig_state)) {
+                        character_matrix_recode[i][c] = original_to_new_mappings[c][orig_state];
+                    } else if (orig_state == 0) {
+                        character_matrix_recode[i][c] = 0;
+                    } else {
+                        character_matrix_recode[i][c] = -1;
+                    }
                 } else {
                     character_matrix_recode[i][c] = -1;
                 }
-            } else {
-                character_matrix_recode[i][c] = -1;
             }
         }
-    }
+
     
-    std::unordered_map<std::string, size_t> taxa_name_to_idx;
-    for (size_t i = 0; i < taxa_names.size(); ++i) {
-        taxa_name_to_idx[taxa_names[i]] = i;
-    }
-    
-    std::vector<std::vector<int>> reordered_matrix(t.num_leaves, std::vector<int>(num_characters));
-    std::vector<bool> leaf_mapped(t.num_leaves, false);
-    
-    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
-        if (t.tree.out_degree(node_id) == 0) {
-            size_t leaf_id = t.tree[node_id].data;
-            
-            if (leaf_id >= t.num_leaves) {
-                throw std::runtime_error("Leaf ID out of range: " + std::to_string(leaf_id));
-            }
-            
-            const std::string& leaf_name = t.node_names[leaf_id];
-            
-            if (taxa_name_to_idx.find(leaf_name) == taxa_name_to_idx.end()) {
-                throw std::runtime_error("Taxon name from tree not found in character matrix: " + leaf_name);
-            }
-            
-            size_t orig_row = taxa_name_to_idx[leaf_name];
-            
-            for (size_t c = 0; c < num_characters; ++c) {
-                reordered_matrix[leaf_id][c] = character_matrix_recode[orig_row][c];
-            }
-            
-            leaf_mapped[leaf_id] = true;
+        std::unordered_map<std::string, size_t> taxa_name_to_idx;
+        for (size_t i = 0; i < taxa_names.size(); ++i) {
+            taxa_name_to_idx[taxa_names[i]] = i;
         }
-    }
+
     
-    for (size_t i = 0; i < t.num_leaves; ++i) {
-        if (!leaf_mapped[i]) {
-            spdlog::warn("Leaf {} not mapped to any taxon in character matrix", i);
-        }
-    }
-    
-    std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(max_alphabet_size, 0.0));
-    
-    for (const auto& [character, orig_state, probability] : raw_priors) {
-        if (character < 0 || character >= static_cast<int>(num_characters)) {
-            throw std::runtime_error("Character index out of range in mutation priors: " + std::to_string(character));
+        std::vector<std::vector<int>> reordered_matrix(t.num_leaves, std::vector<int>(num_characters));
+        std::vector<bool> leaf_mapped(t.num_leaves, false);
+        
+        for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+            if (t.tree.out_degree(node_id) == 0) {
+                size_t leaf_id = t.tree[node_id].data;
+                
+                if (leaf_id >= t.num_leaves) {
+                    throw std::runtime_error("Leaf ID out of range: " + std::to_string(leaf_id));
+                }
+                
+                const std::string& leaf_name = t.node_names[leaf_id];
+                
+                if (taxa_name_to_idx.find(leaf_name) == taxa_name_to_idx.end()) {
+                    throw std::runtime_error("Taxon name from tree not found in character matrix: " + leaf_name);
+                }
+                
+                size_t orig_row = taxa_name_to_idx[leaf_name];
+                
+                for (size_t c = 0; c < num_characters; ++c) {
+                    reordered_matrix[leaf_id][c] = character_matrix_recode[orig_row][c];
+                }
+                
+                leaf_mapped[leaf_id] = true;
+            }
         }
         
-        if (orig_state <= 0) {
-            continue; // skip states 0 and -1
-        }
-        
-        auto& mapping = original_to_new_mappings[character];
-        if (mapping.find(orig_state) == mapping.end()) {
-            spdlog::warn("State {} for character {} in mutation priors not found in character matrix", orig_state, character);
-            continue;
-        }
-        
-        int new_state = mapping[orig_state] - 1;
-        recoded_priors[character][new_state] = probability;
-    }
-
-    for (size_t c = 0; c < num_characters; ++c) {
-        double sum = 0.0;
-        for (size_t j = 0; j < max_alphabet_size; ++j) {
-            sum += recoded_priors[c][j];
-        }
-
-        if (sum <= 0) {
-            spdlog::error("Priors for character {} are all zero.", c);
-            throw std::runtime_error("Priors for character " + std::to_string(c) + " are all zero.");
-        }
-
-        if (std::abs(sum - 1.0) > 1e-6) {
-            spdlog::warn("Priors for character {} do not sum to 1 ({}), renormalizing.", c, sum);
-        }
-
-        for (size_t j = 0; j < max_alphabet_size; ++j) {
-            if (sum > 0) {
-                recoded_priors[c][j] /= sum;
-            } else {
-                recoded_priors[c][j] = 1.0 / max_alphabet_size;
+        for (size_t i = 0; i < t.num_leaves; ++i) {
+            if (!leaf_mapped[i]) {
+                spdlog::warn("Leaf {} not mapped to any taxon in character matrix", i);
             }
         }
+        
+        // std::vector<std::tuple<int, int, double>> raw_priors; need to transform raw_priors
+        std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(max_alphabet_size, 0.0));
+
+        for (const auto& [character, orig_state, probability] : raw_priors) {
+            if (character < 0 || character >= static_cast<int>(num_characters)) {
+                throw std::runtime_error("Character index out of range in mutation priors: " + std::to_string(character));
+            }
+            
+            if (orig_state <= 0) {
+                continue; // skip states 0 and -1
+            }
+            
+            auto& mapping = original_to_new_mappings[character];
+            if (mapping.find(orig_state) == mapping.end()) {
+                spdlog::warn("State {} for character {} in mutation priors not found in character matrix", orig_state, character);
+                continue;
+            }
+            
+            int new_state = mapping[orig_state] - 1;
+            recoded_priors[character][new_state] = probability;
+        }
+
+        for (size_t c = 0; c < num_characters; ++c) {
+            double sum = 0.0;
+            for (size_t j = 0; j < max_alphabet_size; ++j) {
+                sum += recoded_priors[c][j];
+            }
+
+            if (sum <= 0) {
+                spdlog::error("Priors for character {} are all zero.", c);
+                throw std::runtime_error("Priors for character " + std::to_string(c) + " are all zero.");
+            }
+
+            if (std::abs(sum - 1.0) > 1e-6) {
+                spdlog::warn("Priors for character {} do not sum to 1 ({}), renormalizing.", c, sum);
+            }
+
+            for (size_t j = 0; j < max_alphabet_size; ++j) {
+                if (sum > 0) {
+                    recoded_priors[c][j] /= sum;
+                } else {
+                    recoded_priors[c][j] = 1.0 / max_alphabet_size;
+                }
+            }
+        }
+
+        result.num_characters = num_characters;
+        result.max_alphabet_size = max_alphabet_size;
+        result.character_matrix = reordered_matrix;
+        result.mutation_priors = recoded_priors;
+        result.data_type = data_type;
+
+    } else {
+        // std::vector<std::tuple<int, int, double>> raw_priors; need to transform raw_priors
+        // use max_alphabet_size instead of hardcoding
+        std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(3, 0.0));
+
+        for (const auto& [character, orig_state, probability] : raw_priors) {
+            if (character < 0 || character >= static_cast<int>(num_characters)) {
+                throw std::runtime_error("Character index out of range in mutation priors: " + std::to_string(character));
+            }
+            
+            if (orig_state <= 0) {
+                continue; // skip states 0 and -1
+            }
+            recoded_priors[character][character] = probability;
+        }
+
+        result.num_characters = num_characters;
+        result.max_alphabet_size = 3; // hard coded for now @TODO: number of edited states
+        result.observation_matrix = raw_tensor_matrix;
+        result.mutation_priors = recoded_priors;
+        result.data_type = data_type;
     }
-    
-    phylogeny_data result;
-    result.num_characters = num_characters;
-    result.max_alphabet_size = max_alphabet_size;
-    result.character_matrix = reordered_matrix;
-    result.mutation_priors = recoded_priors;
-    
     return result;
 }

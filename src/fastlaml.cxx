@@ -30,7 +30,6 @@
 #define FASTLAML_VERSION_MINOR 0
 
 using json = nlohmann::json;
-
 void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
     spdlog::info("Optimizing model parameters and branch lengths...");
 
@@ -42,8 +41,8 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
         t.branch_lengths[i] = dist(gen);
     }
-    
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+
+    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
 
     auto newick_tree = write_newick_tree(t);
@@ -96,7 +95,7 @@ struct hill_climbing_result {
 hill_climbing_result greedy_hill_climbing(
     const tree& initial_tree, 
     const phylogeny_data& data, 
-    double inital_phi, 
+    double initial_phi,  // fixed typo
     double initial_nu, 
     unsigned int max_iterations,
     unsigned int num_threads,
@@ -104,7 +103,8 @@ hill_climbing_result greedy_hill_climbing(
     double temp = 0.1
 ) {
     tree best_tree = initial_tree;
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
+    // #laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
+    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
     double best_log_likelihood = initial_result.log_likelihood;
     
@@ -204,7 +204,7 @@ void search_optimal_tree(
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, false);
     double current_phi = model.parameters[1];
     double current_nu = model.parameters[0];
@@ -284,6 +284,10 @@ int main(int argc, char** argv) {
         .help("Path to the character matrix file (CSV)")
         .required();
 
+    program.add_argument("-d", "--data-type")
+        .help("String. Options are 'character-matrix' or 'observation-matrix'.")
+        .default_value(std::string("character-matrix")); 
+
     program.add_argument("-t", "--tree")
         .help("Path to the tree file")
         .required();
@@ -353,7 +357,8 @@ int main(int argc, char** argv) {
     phylogeny_data data = process_phylogeny_data(
         t, 
         program.get<std::string>("--character-matrix"),
-        program.get<std::string>("--mutation-priors")
+        program.get<std::string>("--mutation-priors"),
+        program.get<std::string>("--data-type")
     );
     
     unsigned int seed = program.get<unsigned int>("--seed");

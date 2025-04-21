@@ -9,6 +9,8 @@
 #include "phylogeny.h"
 #include "laml_em.h"
 
+std::string data_type("character-matrix");
+std::vector<std::vector<std::vector<double>>> observation_matrix({});
 
 std::pair<tree, laml_model> build_llh_unit_test(
     std::vector<std::vector<int>> character_matrix, 
@@ -37,7 +39,7 @@ std::pair<tree, laml_model> build_llh_unit_test(
     t.node_names = {"c", "a", "b", "internal", "root"};
     
     std::vector<std::vector<double>> mutation_priors = {{mut_prior}};
-    laml_model model(character_matrix, mutation_priors, nu, phi);
+    laml_model model(character_matrix, observation_matrix, mutation_priors, nu, phi, data_type);
     model.alphabet_sizes[0] = 3;
     return {t, model};
 }

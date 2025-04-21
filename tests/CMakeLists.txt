@@ -1,9 +1,11 @@
 add_executable(
     fastlaml_tests 
     likelihood_tests.cxx 
+    #test_parse_matrix.cxx
     ../src/laml_em.cxx 
     ../src/ultrametric.cxx 
     ../src/models/laml.cxx
+    ../src/io.cxx
 )
 
 # add libraries

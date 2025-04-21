@@ -15,10 +15,9 @@ struct laml_data {
     double v1;
     double v2;
 
-    laml_data(std::vector<double> *buffer, double log_phi, double log_one_minus_phi, double v1, double v2) 
+    laml_data(std::vector<double> *buffer, double log_phi, double log_one_minus_phi, double v1, double v2) // copy 
         : buffer(buffer), log_phi(log_phi), log_one_minus_phi(log_one_minus_phi), v1(v1), v2(v2) {}
-
-    laml_data() {}
+    laml_data() {} 
 };
 
 /*
@@ -29,15 +28,19 @@ struct laml_data {
 class laml_model : public phylogenetic_model<laml_data> {
     public:
     std::vector<std::vector<int>> character_matrix;       // [leaf_id][character]
+    std::vector<std::vector<std::vector<double>>> observation_matrix; // change
     std::vector<std::vector<double>> mutation_priors;     // [character][state]
-    std::vector<std::vector<double>> log_mutation_priors; // [character][state]    
+    std::vector<std::vector<double>> log_mutation_priors; // [character][state]   
+    std::string data_type; // change
 
     laml_model(
         const std::vector<std::vector<int>>& character_matrix,
+        const std::vector<std::vector<std::vector<double>>> observation_matrix,
         const std::vector<std::vector<double>>& mutation_priors,
         double nu,
-        double phi
-    ) : character_matrix(character_matrix), mutation_priors(mutation_priors) {
+        double phi,
+        const std::string data_type
+    ) : character_matrix(character_matrix), observation_matrix(observation_matrix), mutation_priors(mutation_priors), data_type(data_type) {
         parameters = {nu, phi}; // nu, phi
         alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
         for (size_t i = 0; i < alphabet_sizes.size(); i++) {
@@ -73,7 +76,6 @@ class laml_model : public phylogenetic_model<laml_data> {
         std::vector<double> *buffer
     ) const {
         std::vector<laml_data> result(tree.size());
-
         for (size_t i = 0; i < tree.size(); ++i) {
             int node = tree[i].data;
             result[node] = laml_data(
