@@ -3,6 +3,8 @@
 #include "models/laml.h"
 #include "math_utilities.h"
 
+#include <cassert>
+
 #include <iterator>
 #include <algorithm>
 #include <numeric>
@@ -90,28 +92,54 @@ void laml_model::compute_taxa_log_inside_likelihood(
 
         if (state == -1) {
             result[0] = 0.0; // 0 corresponds to silenced state? log(1.0) = 0
-            for (size_t i = 1; i < this->alphabet_sizes[character]; i++) {
+            for (size_t i = 1; i < this->alphabet_sizes[character]; i++) { // does this include the unedited and the silenced?
                 result[i] = d.log_phi;
             }
         } else {
             result[state + 1] = d.log_one_minus_phi;
         }
     } else {
+
+        /*
+        std::cout << "[DEBUG] this->data_type " << this->data_type << std::endl;
+        std::cout << "[DEBUG] this->observation_matrix.size() " << this->observation_matrix.size() << std::endl;
+        std::cout << "[DEBUG] this->observation_matrix[taxa_id].size() " << this->observation_matrix[taxa_id].size() << std::endl;
+        std::cout << "[DEBUG] taxa_id " << taxa_id << std::endl;
+        std::cout << "[DEBUG] character " << character << std::endl;
+        */
+
         const std::vector<double>& probs = this->observation_matrix[taxa_id][character];  // now a tensor
 
-        std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
-        double sum = std::accumulate(probs.begin(), probs.end(), 0.0);
+        //std::cout << "[DEBUG] probs.size() = " << probs.size() << std::endl;
 
-        if (sum == 0.0) { // Missing observed data case
-            result[0] = 0.0;
-            for (size_t i = 0; i < this->alphabet_sizes[character]; ++i) {
-                result[i+1] = d.log_phi;
+        std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
+        // by definition
+        assert(result.size() >= this->alphabet_sizes[character]);
+
+        bool all_negative_infinity = std::all_of(
+            probs.begin(), probs.end(),
+            [](double x) { return x == NEGATIVE_INFINITY; }
+        );
+
+        if (all_negative_infinity) { // observed data is missing state
+            //std::cout << "[DEBUG] all_negative_infinity is true" << std::endl;
+            //std::cout << "[DEBUG] this->alphabet_sizes[character] = " << this->alphabet_sizes[character] << std::endl;
+            //std::cout << "[DEBUG] result.size() = " << result.size() << std::endl;
+            result[0] = 0.0; // silenced latent state generating observed missing has probability 1.0
+            for (size_t i = 1; i < this->alphabet_sizes[character]; ++i) { // the first character is missing state
+                result[i] = d.log_phi; // unedited and edited latent states generating 
             }
-         } else {
-             // observed data is not missing, result[0] corresponds to missing latent state, initialized to NEGATIVE_INFINITY
-             for (size_t i = 0; i < probs.size(); ++i) {
-                // result[i] = probs[i] + d.log_one_minus_phi; // assumes precomputed
-                result[i+1] = std::log(probs[i]) + d.log_one_minus_phi; // fills in 1-4
+         } else { // observed data is not missing
+             // result[0] is missing latent state, initialized to NEGATIVE_INFINITY since impossible
+            //std::cout << "[DEBUG] all_negative_infinity is false" << std::endl;
+            //std::cout << "[DEBUG] this->alphabet_sizes[character] = " << this->alphabet_sizes[character] << std::endl;
+            //std::cout << "[DEBUG] result.size() = " << result.size() << std::endl;
+             for (size_t i = 0; i < probs.size(); ++i) { // the first character is unedited
+                //std::cout << "[DEBUG] probs[i] = " << probs[i] << std::endl;
+                //sbtd::cout << "[DEBUG] log(probs[i]) = " << std::log(probs[i]) << std::endl;
+                result[i+1] = probs[i] + d.log_one_minus_phi; // assumes precomputed
+                //std::cout << "[DEBUG] log(probs[i]) + d.log_one_minus_phi = " << std::log(probs[i]) + d.log_one_minus_phi << std::endl;
+                //result[i+1] = std::log(probs[i]) + d.log_one_minus_phi; // fills in 1-4
             }
         }
     }

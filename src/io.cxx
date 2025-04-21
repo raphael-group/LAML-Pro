@@ -5,6 +5,7 @@
 #include "csv.hpp"
 #include "extern/compact_tree.h"
 
+#define NEGATIVE_INFINITY (-1e7)
 /*!
 * @brief Parse a Newick tree file into a Tree struct.
 * @param fname The path to the Newick tree file.
@@ -152,7 +153,7 @@ std::tuple<
             character_key_set.insert(character_key);
 
             // hard coded to 4 states for now @TODO
-            std::vector<double> state_probs(4, 0.0);
+            std::vector<double> state_probs(4, NEGATIVE_INFINITY);
             state_probs[0] = row["state0_prob"].get<double>();
             state_probs[1] = row["state1_prob"].get<double>();
             state_probs[2] = row["state3_prob"].get<double>();
@@ -193,6 +194,15 @@ std::tuple<
         size_t j = character_index_map[character_key];
         matrix[i][j] = probs;
     }
+
+    // std::cout << "Character_keys[0]: " << character_keys[0] << std::endl;
+    std::cout << "Character keys:\n";
+    for (size_t i = 0; i < character_keys.size(); ++i) {
+        const auto& [cassette_idx, target_site] = character_keys[i];
+        std::cout << "  index " << i << ": (cassette_idx = " << cassette_idx
+                  << ", target_site = " << target_site << ")\n";
+    }
+    std::cout << "taxa_names[0]: " << taxa_names[0] << std::endl;
     
     return {taxa_names, character_keys, matrix};
 }

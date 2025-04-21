@@ -10,15 +10,17 @@
 #include "laml_em.h"
 #include "likelihood_utils.h"
 
-std::string data_type("character-matrix");
-std::vector<std::vector<std::vector<double>>> observation_matrix({});
+#define NEGATIVE_INFINITY (-1e7)
+
+//std::vector<std::vector<std::vector<double>>> observation_matrix({});
 
 std::pair<tree, laml_model> build_llh_unit_test(
-    std::vector<std::vector<int>> character_matrix, 
+    std::vector<std::vector<std::vector<double>>> observation_matrix,
     double phi, 
     double nu, 
-    double mut_prior
+    std::vector<std::vector<double>> mutation_priors
 ) {
+    std::vector<std::vector<int>> character_matrix({});
     // tree: ((a:1.0,b:1.0):1.0,c:1.0):1.0;
     digraph<size_t> tree_graph;
     for (int i = 0; i < 5; i++) {
@@ -38,68 +40,63 @@ std::pair<tree, laml_model> build_llh_unit_test(
     t.tree = tree_graph;
     t.branch_lengths = {1.0, 1.0, 1.0, 1.0, 1.0};
     t.node_names = {"c", "a", "b", "internal", "root"};
+
+    //std::cout << "Done building tree"<< std::endl;
     
-    std::vector<std::vector<double>> mutation_priors = {{mut_prior}};
-    laml_model model(character_matrix, observation_matrix, mutation_priors, nu, phi, data_type);
-    model.alphabet_sizes[0] = 3;
+    //std::vector<std::vector<double>> mutation_priors = {{mut_prior}};
+
+    laml_model model(character_matrix, observation_matrix, mutation_priors, nu, phi, "observation-matrix");
+    
+    //std::cout << "Call to laml_model returned"<< std::endl;
+    // model.alphabet_sizes[0] = 3;
     return {t, model};
 }
-/*
-bool check_inside_outside(
-    const likelihood_buffer& inside_ll, 
-    const likelihood_buffer& outside_ll, 
-    const std::vector<double>& llh,
-    int max_alphabet_size,
-    double tolerance
-) {
-    size_t num_characters = inside_ll.num_characters;
-    size_t num_nodes = inside_ll.num_nodes;
-    for (size_t character = 0; character < num_characters; ++character) {
-        for (size_t node = 0; node < num_nodes; ++node) {
-            std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
-            for (int j = 0; j < max_alphabet_size; ++j) {
-                tmp_buffer[j] = inside_ll(character, node, j) + outside_ll(character, node, j);
-            }
 
-            double test_llh = log_sum_exp(tmp_buffer.begin(), tmp_buffer.end());
-            if (abs(llh[character] - test_llh) > tolerance) {
-                return false;
-            }
-        }
-    }
-    return true;
-}*/
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_1", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {1}, {1}}, 0.0, 0.0, 1.0);
-
-    std::vector<double> buffer(model.alphabet_sizes[0]);
-    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_1", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {1}, {1}}, 0.0, 0.0, 1.0);
+    /*
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0}}, // log(1.0) = 0
+            {{NEGATIVE_INFINITY, 0}},
+            {{NEGATIVE_INFINITY, 0}}});
+            */
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0}}, // log(1.0) = 0
+            {{NEGATIVE_INFINITY, 0}},
+            {{NEGATIVE_INFINITY, 0}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0}});
     
     size_t num_characters = model.alphabet_sizes.size();
     size_t max_alphabet_size = model.alphabet_sizes[0];
-
+ 
     /*
-    std::cout << "INSIDE_OUTSIDE_CMAT:\n";
+    std::cout << "INSIDE_OUTSIDE_OBS:\n";
     std::cout << "Alphabet sizes per character:\n";
     for (size_t i = 0; i < model.alphabet_sizes.size(); ++i) {
         std::cout << "  Character " << i << ": " << model.alphabet_sizes[i] << std::endl;
     }
 
+
     std::cout << "Number of characters: " << num_characters << std::endl;
     std::cout << "Number of characters in mutation_priors: " << model.mutation_priors.size() << std::endl;
     std::cout << "Max alphabet size (first character): " << max_alphabet_size << std::endl;
     std::cout << "Alphabet size in mutation_priors: " << model.mutation_priors[0].size() << std::endl;
-    std::cout << "Character matrix (first cell, first character): " << model.character_matrix[0][0] << std::endl;
-    std::cout << "Character Matrix Contents:\n";
-    for (size_t i = 0; i < model.character_matrix.size(); ++i) {
+    
+    std::cout << "Observation Matrix Contents:\n";
+    for (size_t i = 0; i < observation_matrix.size(); ++i) {
         std::cout << "  Taxon " << i << ":\n";
-        for (size_t j = 0; j < model.character_matrix[i].size(); ++j) {
-            std::cout << model.character_matrix[i][j] << " ";
+        for (size_t j = 0; j < observation_matrix[i].size(); ++j) {
+            std::cout << "    Character " << j << " → [ ";
+            for (size_t k = 0; k < observation_matrix[i][j].size(); ++k) {
+                std::cout << observation_matrix[i][j][k] << " ";
+            }
+            std::cout << "]\n";
         }
-        std::cout << "\n";
     }*/
-
+    std::vector<double> buffer(max_alphabet_size);
+    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
+    
+    
     likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
@@ -125,9 +122,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_1", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_2", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {1}, {0}}, 0.0, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_2", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {1}, {0}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -159,43 +160,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_2", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_3", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {0}, {1}}, 0.0, 0.0, 1.0);
-
-    std::vector<double> buffer(model.alphabet_sizes[0]);
-    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
-    
-    size_t num_characters = model.alphabet_sizes.size();
-    size_t max_alphabet_size = model.alphabet_sizes[0];
-    likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
-    likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
-    likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
-
-    std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
-    std::vector<double> llh = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
-    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
-    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
-    REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
-
-    double expected_llh = -3.917350291274164;
-    REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
-
-    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
-    double leaf_responsibility = 0.0;
-    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
-    for(size_t i = 0; i < t.num_nodes; ++i) {
-        double sum = 0.0;
-        for(size_t j = 0; j < 6; ++j) {
-            sum += responsibilities[i][j];
-        }
-
-        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
-    }
-}
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_4", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {1}, {1}}, 0.0, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_3", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {0}, {1}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -227,9 +198,50 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_4", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_4", "[obs_insidellh]") {
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_5", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {0}, {0}}, 0.0, 0.0, 1.0);
+    std::vector<double> buffer(model.alphabet_sizes[0]);
+    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
+    
+    size_t num_characters = model.alphabet_sizes.size();
+    size_t max_alphabet_size = model.alphabet_sizes[0];
+    likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+
+    std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
+    std::vector<double> llh = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
+    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+    REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
+
+    double expected_llh = -3.917350291274164;
+    REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
+}
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_5", "[obs_insidellh]") {
+    //auto [t, model] = build_llh_unit_test({{1}, {0}, {0}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -262,8 +274,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_5", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_6", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {1}, {0}}, 0.0, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_6", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {1}, {0}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -296,8 +313,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_6", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_7", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {0}, {1}}, 0.0, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_7", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {0}, {1}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -330,8 +352,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_7", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_8", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {0}, {0}}, 0.0, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_8", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {0}, {0}}, 0.0, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -364,8 +391,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_8", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_9", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {0}, {-1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_9", "[obs_insidellh]") {
+    //auto [t, model] = build_llh_unit_test({{0}, {0}, {-1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}, // log(1.0) = 0
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -397,9 +429,56 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_9", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_10", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {-1}, {0}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_10", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {-1}, {0}}, 0.1, 0.0, 1.0);
+    std::vector<double> buffer(model.alphabet_sizes[0]);
+    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
+    
+    size_t num_characters = model.alphabet_sizes.size();
+    size_t max_alphabet_size = model.alphabet_sizes[0];
+    
+    // print to check, num_characters should be 1
+    //std::cout << "Number of characters: " << num_characters << std::endl;
+    //std::cout << "Max alphabet size (first character): " << max_alphabet_size << std::endl;
+
+    likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+
+    std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
+    std::vector<double> llh = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
+    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+    REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
+
+    double expected_llh = -6.513306124309698;
+    REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
+}
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_11", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{-1}, {0}, {0}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -431,9 +510,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_10", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_11", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{-1}, {0}, {0}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_12", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {1}, {-1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -450,7 +533,7 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_11", "[insidellh]") {
     phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
     REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
 
-    double expected_llh = -6.513306124309698;
+    double expected_llh = -5.97198126969678;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
 
     std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
@@ -465,9 +548,14 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_11", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_13", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{0}, {-1}, {1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_12", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {1}, {-1}}, 0.1, 0.0, 1.0);
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -500,8 +588,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_12", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_13", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{0}, {-1}, {1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_14", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{-1}, {0}, {1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -534,8 +627,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_13", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_14", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{-1}, {0}, {1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_15", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {-1}, {0}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -552,7 +650,7 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_14", "[insidellh]") {
     phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
     REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
 
-    double expected_llh = -5.97198126969678;
+    double expected_llh = -4.658719582178557;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
 
     std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
@@ -567,9 +665,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_14", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_15", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {-1}, {0}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_16", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{-1}, {1}, {0}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -602,42 +704,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_15", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_16", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{-1}, {1}, {0}}, 0.1, 0.0, 1.0);
-
-    std::vector<double> buffer(model.alphabet_sizes[0]);
-    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
-    
-    size_t num_characters = model.alphabet_sizes.size();
-    size_t max_alphabet_size = model.alphabet_sizes[0];
-    likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
-    likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
-    likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
-
-    std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
-    std::vector<double> llh = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
-    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
-    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
-    REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
-
-    double expected_llh = -4.658719582178557;
-    REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
-
-    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
-    double leaf_responsibility = 0.0;
-    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
-    for(size_t i = 0; i < t.num_nodes; ++i) {
-        double sum = 0.0;
-        for(size_t j = 0; j < 6; ++j) {
-            sum += responsibilities[i][j];
-        }
-
-        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
-    }
-}
-
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_17", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {1}, {-1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_17", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {1}, {-1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -670,8 +743,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_17", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_18", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {-1}, {1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_18", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{1}, {-1}, {1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -704,8 +782,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_18", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_19", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{-1}, {1}, {1}}, 0.1, 0.0, 1.0);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_19", "[obs_insidellh]") {
+    // auto [t, model] = build_llh_unit_test({{-1}, {1}, {1}}, 0.1, 0.0, 1.0);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.1, 0.0, {{1.0, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -739,8 +822,13 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_19", "[insidellh]") {
     }
 }
 
-TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_20", "[insidellh]") {
-    auto [t, model] = build_llh_unit_test({{1}, {1}, {1}}, 0.0, 0.0, 0.5);
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_20", "[obs_insidellh]") {
+    //auto [t, model] = build_llh_unit_test({{1}, {1}, {1}}, 0.0, 0.0, 0.5);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}},
+            {{NEGATIVE_INFINITY, 0, NEGATIVE_INFINITY, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{0.5, 0.0, 0.0}});
 
     std::vector<double> buffer(model.alphabet_sizes[0]);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
@@ -771,4 +859,4 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_20", "[insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
-}
+} 
