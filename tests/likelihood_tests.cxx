@@ -124,6 +124,19 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_1", "[insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
+
+    /*
+    std::cout << "MAT_LLH_1: printing responsibilities:";
+    for(size_t i = 0; i < responsibilities.size(); ++i) {
+        std::ostringstream oss2;
+        oss2 << "Node " << i << ": [";
+        for (size_t j = 0; j < responsibilities[i].size(); ++j) {
+            oss2 << responsibilities[i][j];
+            if (j + 1 < responsibilities[i].size()) oss2 << ", ";
+        }
+        oss2 << "]\n";
+        std::cout << oss2.str();
+    }*/
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_2", "[insidellh]") {
@@ -260,6 +273,22 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_5", "[insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
+    // print the responsibility
+    std::cout << "MAT_LLH_5: printing responsibilities:";
+    for(size_t i = 0; i < responsibilities.size(); ++i) {
+        std::ostringstream oss2;
+        oss2 << "Node " << i << ": [";
+        for (size_t j = 0; j < responsibilities[i].size(); ++j) {
+            oss2 << responsibilities[i][j];
+            if (j + 1 < responsibilities[i].size()) oss2 << ", ";
+        }
+        oss2 << "]\n";
+        std::cout << oss2.str();
+    }
+
+    print_likelihood_buffer("Inside LL", inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Edge Inside LL", edge_inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Outside LL", outside_ll, num_characters, max_alphabet_size, t.num_nodes);
 }
 
 TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_6", "[insidellh]") {
@@ -772,3 +801,4 @@ TEST_CASE("INSIDE_OUTSIDE_TEST_LLH_20", "[insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
+

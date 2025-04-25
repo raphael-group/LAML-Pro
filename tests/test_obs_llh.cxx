@@ -93,6 +93,8 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_1", "[obs_insidellh]") {
             std::cout << "]\n";
         }
     }*/
+    
+
     std::vector<double> buffer(max_alphabet_size);
     std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
     
@@ -109,7 +111,7 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_1", "[obs_insidellh]") {
 
     double expected_llh = -0.20665578828621584;
     REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
-
+    
     std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
     double leaf_responsibility = 0.0;
     laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
@@ -121,6 +123,19 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_1", "[obs_insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
+
+    /*
+    std::cout << "OBS_LLH_1: printing responsibilities:";
+    for(size_t i = 0; i < responsibilities.size(); ++i) {
+        std::ostringstream oss2;
+        oss2 << "Node " << i << ": [";
+        for(size_t j = 0; j < responsibilities[i].size(); ++j) {
+            oss2 << responsibilities[i][j];
+            if (j + 1 < responsibilities[i].size()) oss2 << ", ";
+        }
+        oss2 << "]\n";
+        std::cout << oss2.str();
+    }*/
 }
 TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_2", "[obs_insidellh]") {
     // auto [t, model] = build_llh_unit_test({{1}, {1}, {0}}, 0.0, 0.0, 1.0);
@@ -235,6 +250,7 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_4", "[obs_insidellh]") {
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
 }
+
 TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_5", "[obs_insidellh]") {
     //auto [t, model] = build_llh_unit_test({{1}, {0}, {0}}, 0.0, 0.0, 1.0);
     std::vector<std::vector<std::vector<double>>> observation_matrix({
@@ -389,6 +405,8 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_8", "[obs_insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
+
+
 }
 
 TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_9", "[obs_insidellh]") {
@@ -859,4 +877,60 @@ TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_20", "[obs_insidellh]") {
 
         REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
     }
+} 
+
+TEST_CASE("OBS_INSIDE_OUTSIDE_TEST_LLH_21", "[obs_insidellh]") {
+    //auto [t, model] = build_llh_unit_test({{1}, {1}, {1}}, 0.0, 0.0, 0.5);
+    std::vector<std::vector<std::vector<double>>> observation_matrix({
+            {{NEGATIVE_INFINITY, 0}},
+            {{0, NEGATIVE_INFINITY}},
+            {{0, NEGATIVE_INFINITY}}});
+    auto [t, model] = build_llh_unit_test(observation_matrix, 0.0, 0.0, {{1.0}});
+
+    std::vector<double> buffer(model.alphabet_sizes[0]);
+    std::vector<laml_data> model_data = model.initialize_data(t.tree, t.branch_lengths, &buffer);
+    
+    size_t num_characters = model.alphabet_sizes.size();
+    size_t max_alphabet_size = model.alphabet_sizes[0];
+    likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
+    likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
+
+    std::vector<double> tmp_buffer(max_alphabet_size, 0.0);
+    std::vector<double> llh = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
+    phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
+    phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+    REQUIRE(check_inside_outside(inside_ll, outside_ll, llh, max_alphabet_size, 1e-6));
+
+    double expected_llh = -4.4586751457870815;
+    REQUIRE(abs(llh[0] - expected_llh) < 1e-6);
+
+    std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
+    double leaf_responsibility = 0.0;
+    laml_expectation_step(t, model, llh, inside_ll, outside_ll, edge_inside_ll, model_data, responsibilities, leaf_responsibility);
+    for(size_t i = 0; i < t.num_nodes; ++i) {
+        double sum = 0.0;
+        for(size_t j = 0; j < 6; ++j) {
+            sum += responsibilities[i][j];
+        }
+
+        REQUIRE(abs(sum - ((double) num_characters)) < 1e-6);
+    }
+    
+    std::cout << "OBS_MAT_LLH_5: printing responsibilities:";
+    for(size_t i = 0; i < responsibilities.size(); ++i) {
+        std::ostringstream oss2;
+        oss2 << "Node " << i << ": [";
+        for (size_t j = 0; j < responsibilities[i].size(); ++j) {
+            oss2 << responsibilities[i][j];
+            if (j + 1 < responsibilities[i].size()) oss2 << ", ";
+        }
+        oss2 << "]\n";
+        std::cout << oss2.str();
+    }
+
+    print_likelihood_buffer("Inside LL", inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Edge Inside LL", edge_inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Outside LL", outside_ll, num_characters, max_alphabet_size, t.num_nodes);
+
 } 

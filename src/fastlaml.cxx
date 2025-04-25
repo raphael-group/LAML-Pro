@@ -26,8 +26,15 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/fmt/ostr.h>
 
+#include <spdlog/sinks/basic_file_sink.h>
+
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
+#ifndef GIT_COMMIT_HASH
+#define GIT_COMMIT_HASH "unknown"
+#endif
+
+std::string command;
 
 using json = nlohmann::json;
 void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
@@ -42,8 +49,21 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
         t.branch_lengths[i] = dist(gen);
     }
 
+    // label internal nodes in t
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id >= t.node_names.size() || t.node_names[node_id].empty()) {
+            if (node_id >= t.node_names.size()) {
+                t.node_names.resize(t.num_nodes);  // Ensure size matches num_nodes
+            }
+            t.node_names[node_id] = "internal_" + std::to_string(node_id);
+        }
+    }
+
     laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
+
+    // TODO: save the posterior probabilities
+    
 
     auto newick_tree = write_newick_tree(t);
     std::ofstream output_file(output_prefix + "_tree.newick");
@@ -66,12 +86,15 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     } else {
         spdlog::error("Could not open file for writing: {}", output_prefix + "_ultrametric_tree.newick");
     }
+    
 
     json output_json;
     output_json["phi"] = model.parameters[1];
     output_json["nu"] = model.parameters[0];
     output_json["em_iterations"] = em_res.num_iterations;
     output_json["log_likelihood"] = em_res.log_likelihood;
+    output_json["command"] = command;
+    output_json["git_commit"] = GIT_COMMIT_HASH;
 
     std::ofstream json_file(output_prefix + "_results.json");
     if (json_file.is_open()) {
@@ -265,6 +288,12 @@ int main(int argc, char** argv) {
         std::to_string(FASTLAML_VERSION_MAJOR) + "." + std::to_string(FASTLAML_VERSION_MINOR),
         argparse::default_arguments::help
     );
+    
+    command.clear();
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) command += " ";
+        command += argv[i];
+    }
 
     program.add_argument("--version")
         .action([&](const auto & /*unused*/) {
@@ -280,8 +309,8 @@ int main(int argc, char** argv) {
         .help("Path to the mutation priors file")
         .default_value(std::string(""));
 
-    program.add_argument("-c", "--character-matrix")
-        .help("Path to the character matrix file (CSV)")
+    program.add_argument("-c", "--matrix")
+        .help("Path to the matrix file (CSV)")
         .required();
 
     program.add_argument("-d", "--data-type")
@@ -295,6 +324,11 @@ int main(int argc, char** argv) {
     program.add_argument("-o", "--output")
         .help("Path to the output file")
         .required();
+    
+    program.add_argument("-v", "--verbose")
+        .help("Additionally save all console logs to a file automatically.")
+        .default_value(false)
+        .implicit_value(true);
 
     program.add_argument("--threads")
         .help("number of threads to use")
@@ -329,6 +363,24 @@ int main(int argc, char** argv) {
         std::exit(1);
     }
 
+    if (program.get<bool>("--verbose")) {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        console_sink->set_level(spdlog::level::info);
+
+        // Create file sink
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(program.get<std::string>("--output") + "_fastlaml.log", true);
+        file_sink->set_level(spdlog::level::debug);  // Log everything to file
+
+        // Combine them into a multi-sink logger
+        auto logger = std::make_shared<spdlog::logger>("multi_logger", spdlog::sinks_init_list{console_sink, file_sink});
+        spdlog::set_default_logger(logger);
+        spdlog::set_level(spdlog::level::debug); // Set global log level
+        spdlog::info("Logger initialized");
+        spdlog::info("Command: {}", command);
+    
+    }
+
+
     spdlog::info("Loading tree from Newick file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
 
@@ -356,7 +408,7 @@ int main(int argc, char** argv) {
 
     phylogeny_data data = process_phylogeny_data(
         t, 
-        program.get<std::string>("--character-matrix"),
+        program.get<std::string>("--matrix"),
         program.get<std::string>("--mutation-priors"),
         program.get<std::string>("--data-type")
     );

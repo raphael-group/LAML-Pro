@@ -24,3 +24,10 @@ em_results laml_expectation_maximization(
     int max_em_iterations = 100,
     bool verbose = false
 );
+
+void print_likelihood_buffer(const std::string& label,
+                             const likelihood_buffer& buf,
+                             size_t num_characters,
+                             size_t max_alphabet_size,
+                             size_t num_nodes);
+

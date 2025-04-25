@@ -70,6 +70,11 @@ enum class DataType {
     ObservationMatrix
 };
 /*!
+ * @brief Helper function to print the result struct from process_phylogeny_data
+ * @param result The phylogeny_data result object
+ */
+void print_result_summary(const phylogeny_data& result);
+/*!
  * @brief Process character matrix and mutation priors to create a phylogeny_data object.
  * @param t The tree structure
  * @param character_matrix_file Path to the character matrix CSV

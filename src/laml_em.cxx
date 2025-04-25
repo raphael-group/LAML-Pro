@@ -3,6 +3,8 @@
 #include <cmath>
 
 #include <iostream>
+#include <sstream>
+
 #include <spdlog/spdlog.h>
 
 #include "math_utilities.h"
@@ -11,6 +13,8 @@
 #include "laml_em.h"
 
 #include <nlopt.hpp>
+
+#define NEGATIVE_INFINITY (-1e7)
 
 struct e_step_data {
     std::vector<std::array<double, 6>>& responsibilities;
@@ -215,6 +219,28 @@ void laml_expectation_step(
     } 
 }
 
+void print_likelihood_buffer(const std::string& label,
+                             const likelihood_buffer& buf,
+                             size_t num_characters,
+                             size_t max_alphabet_size,
+                             size_t num_nodes) {
+    spdlog::info("=== {} ===", label);
+    for (size_t c = 0; c < num_characters; ++c) {
+        spdlog::info("Character {}", c);
+        for (size_t n = 0; n < num_nodes; ++n) {
+            std::ostringstream oss;
+            oss << "  Node " << n << ": [";
+            for (size_t a = 0; a < max_alphabet_size; ++a) {
+                oss << std::fixed << std::setprecision(4) << buf(c, n, a);
+                if (a + 1 < max_alphabet_size) oss << ", ";
+            }
+            oss << "]";
+            spdlog::info("{}", oss.str());
+        }
+    }
+    spdlog::info("=======================");
+}
+
 em_results laml_expectation_maximization(
     tree& t, 
     laml_model& model,
@@ -223,23 +249,42 @@ em_results laml_expectation_maximization(
 ) {
     int num_characters = model.alphabet_sizes.size();
     int max_alphabet_size = *std::max_element(model.alphabet_sizes.begin(), model.alphabet_sizes.end());
-    
+   
     int num_missing = 0;
     int num_not_missing = 0;
 
-    for (size_t i = 0; i < model.character_matrix.size(); ++i) {
-        for (size_t j = 0; j < model.character_matrix[i].size(); ++j) {
-            if (model.character_matrix[i][j] == -1) {
-                num_missing++;
-            } else {
-                num_not_missing++;
+    if (model.data_type == "character-matrix") {
+        //spdlog::info("laml_em character-matrix");
+        for (size_t i = 0; i < model.character_matrix.size(); ++i) {
+            for (size_t j = 0; j < model.character_matrix[i].size(); ++j) {
+                if (model.character_matrix[i][j] == -1) {
+                    num_missing++;
+                } else {
+                    num_not_missing++;
+                }
             }
         }
+        //spdlog::info("laml_em character-matrix: num_missing = {}, num_not_missing = {}", num_missing, num_not_missing);
+    } else {
+        spdlog::info("laml_em observation-matrix");
+        for (size_t i = 0; i < model.observation_matrix.size(); ++i) {
+            for (size_t j = 0; j < model.observation_matrix[i].size(); ++j) {
+                const std::vector<double>& probs = model.observation_matrix[i][j];
+                bool all_negative_infinity = std::all_of(probs.begin(), probs.end(),
+                                        [](double x) {return x == NEGATIVE_INFINITY;});
+                if (all_negative_infinity) { num_missing++; } else { num_not_missing++; }
+            }
+        }
+        //spdlog::info("laml_em observation-matrix: num_missing = {}, num_not_missing = {}", num_missing, num_not_missing);
     }
 
     likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
+
+    print_likelihood_buffer("Inside LL", inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Edge Inside LL", edge_inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+    print_likelihood_buffer("Outside LL", outside_ll, num_characters, max_alphabet_size, t.num_nodes);
 
     // set up the M-step solver
     nlopt::opt opt(nlopt::LD_CCSAQ, t.num_nodes + 2);
@@ -255,6 +300,16 @@ em_results laml_expectation_maximization(
 
     // initialize model parameters
     std::vector<double> internal_comp_buffer(max_alphabet_size);
+    
+    /*std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+        oss << t.branch_lengths[i];
+        if (i != t.branch_lengths.size() - 1) oss << ", ";
+    }
+    oss << "]";
+    spdlog::debug("branch lengths: {}", oss.str());*/
+
     auto model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
 
     params[0] = model.parameters[0];
@@ -269,8 +324,16 @@ em_results laml_expectation_maximization(
     for (; i < max_em_iterations; i++) {
         auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
 
+        //spdlog::info("laml_em em_iter = {}, likelihood = {}", i, likelihood[0]);
+
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
         phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
+
+        if (verbose) {
+            print_likelihood_buffer("Inside LL", inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+            print_likelihood_buffer("Edge Inside LL", edge_inside_ll, num_characters, max_alphabet_size, t.num_nodes);
+            print_likelihood_buffer("Outside LL", outside_ll, num_characters, max_alphabet_size, t.num_nodes);
+        }
 
         std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
         double leaf_responsibility = 0.0;
@@ -284,6 +347,15 @@ em_results laml_expectation_maximization(
         if (verbose) {
             spdlog::info("EM iteration: {} Log likelihood: {}", i, llh_before);
             spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
+            
+            /*std::ostringstream oss;
+            oss << "[";
+            for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+                oss << t.branch_lengths[i];
+                if (i != t.branch_lengths.size() - 1) oss << ", ";
+            }
+            oss << "]";
+            spdlog::debug("branch lengths: {}", oss.str());*/
         }
 
         double fx;
@@ -302,6 +374,29 @@ em_results laml_expectation_maximization(
         }
 
         // update model parameters
+        // write the branch lengths to info for debugging
+        /*std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
+            oss << t.branch_lengths[i];
+            if (i != t.branch_lengths.size() - 1) oss << ", ";
+        }
+        oss << "]";
+
+        spdlog::debug("branch lengths: {}", oss.str());
+        
+        spdlog::debug("responsibilities:");
+        for (size_t i = 0; i < responsibilities.size(); ++i) {
+            std::ostringstream oss2;
+            oss2 << "Node " << i << ": [";
+            for (size_t j = 0; j < responsibilities[i].size(); ++j) {
+                oss2 << responsibilities[i][j];
+                if (j + 1 < responsibilities[i].size()) oss2 << ", ";
+            }
+            oss2 << "]\n";
+            spdlog::info("{}", oss2.str());
+        }*/
+
         model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
         likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
 
