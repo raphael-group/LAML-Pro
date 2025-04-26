@@ -1,3 +1,3 @@
 Notes on some sanity check end-to-end tests:
-- example00 is a sanity check case, where the character matrix ultrametric tree should produce the same output as the observation matrix with log(0)=-1e7 probability for the states not in the character matrix.
+- example00 is a sanity check case. There are only two possible states (unedited and edited). The character matrix ultrametric tree should produce the same output as the observation matrix with log(0)=-1e7 probability for the states not in the character matrix.
 - example01 is a second sanity check case, where the observation matrix and prior file contains states which are probaiblity 0. Again, the character matrix and the observation matrix give the same ultrametric tree.

@@ -1,8 +1,0 @@
-{
-    "command": "./src/fastlaml --mode optimize -t ../examples/example00/starting.tree -c ../examples/example00/observation_matrix.csv -o ../examples/example00/example0A_test --data-type observation-matrix -v -m ../examples/example00/priors.csv",
-    "em_iterations": 15,
-    "git_commit": "15b3957e89068b5107476137b19b88a42190bc4b",
-    "log_likelihood": -0.00019512985476734617,
-    "nu": 1e-05,
-    "phi": 1e-05
-}

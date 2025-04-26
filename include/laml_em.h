@@ -4,6 +4,7 @@
 struct em_results {
     double log_likelihood;
     int num_iterations;
+    std::vector<std::vector<std::vector<double>>> posterior_llh;
 };
 
 void laml_expectation_step(

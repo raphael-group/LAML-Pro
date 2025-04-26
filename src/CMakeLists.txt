@@ -20,3 +20,6 @@ execute_process(
 
 # Define it as a macro in the compiler
 add_compile_definitions(GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
+
+target_compile_definitions(fastlaml PRIVATE GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
+

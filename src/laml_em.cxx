@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 
 #include <spdlog/spdlog.h>
 
@@ -416,5 +417,47 @@ em_results laml_expectation_maximization(
         }
     }
 
-    return {llh, i + 1};
+    em_results results;
+    results.log_likelihood = llh;
+    results.num_iterations = i+1;
+
+    size_t num_nodes = t.num_nodes;
+    size_t alphabet_size = model.alphabet_sizes[0]; // assuming same for all characters
+
+    results.posterior_llh.resize(num_characters,
+    std::vector<std::vector<double>>(num_nodes,
+    std::vector<double>(alphabet_size, 0.0)));
+
+    for (size_t c = 0; c < num_characters; ++c) {
+        for (size_t n = 0; n < num_nodes; ++n) {
+            double norm_const = 0.0;
+            std::vector<double> log_post(alphabet_size, -std::numeric_limits<double>::infinity());
+
+            for (size_t s = 0; s < alphabet_size; ++s) {
+                log_post[s] = inside_ll(c, n, s) + outside_ll(c, n, s);
+            }
+
+            // log-sum-exp normalization
+            double max_log = *std::max_element(log_post.begin(), log_post.end());
+            double sum = 0.0;
+            for (size_t s = 0; s < alphabet_size; ++s) {
+                results.posterior_llh[c][n][s] = std::exp(log_post[s] - max_log);
+                sum += results.posterior_llh[c][n][s];
+            }
+            for (size_t s = 0; s < alphabet_size; ++s) {
+                results.posterior_llh[c][n][s] /= sum;
+            }
+            std::ostringstream oss;
+            for (size_t s = 0; s < alphabet_size; ++s) {
+                oss << std::fixed << std::setprecision(4) << results.posterior_llh[c][n][s];
+                if (s + 1 < alphabet_size) oss << ", ";
+            }
+
+            spdlog::debug("Posterior for char {}, node {}: [{}]", c, n, oss.str());
+        }
+    }
+
+
+    //return {llh, i + 1};
+    return results;
 }
