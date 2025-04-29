@@ -421,12 +421,12 @@ int main(int argc, char** argv) {
 
         // Create file sink
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(program.get<std::string>("--output") + "_fastlaml.log", true);
-        file_sink->set_level(spdlog::level::debug); // info); // Log everything to file
+        file_sink->set_level(spdlog::level::info); // debug); // Log everything to file
 
         // Combine them into a multi-sink logger
         auto logger = std::make_shared<spdlog::logger>("multi_logger", spdlog::sinks_init_list{console_sink, file_sink});
         spdlog::set_default_logger(logger);
-        spdlog::set_level(spdlog::level::debug); //info); // Set global log level
+        spdlog::set_level(spdlog::level::info); // debug); // Set global log level
         spdlog::info("Logger initialized");
         spdlog::info("Command: {}", command);
     

@@ -549,22 +549,26 @@ phylogeny_data process_phylogeny_data(
                 sum += recoded_priors[c][j];
             }
 
+            // It's possible that there are no edits observed at a given state
             if (sum <= 0) {
-                spdlog::error("Priors for character {} are all zero.", c);
-                throw std::runtime_error("Priors for character " + std::to_string(c) + " are all zero.");
-            }
+                spdlog::warn("Priors for character {} are all zero.", c);
+                //spdlog::error("Priors for character {} are all zero.", c);
+                // throw std::runtime_error("Priors for character " + std::to_string(c) + " are all zero.");
+            } else {
+                if (std::abs(sum - 1.0) > 1e-6) {
+                    spdlog::warn("Priors for character {} do not sum to 1 ({}), renormalizing.", c, sum);
+                }
 
-            if (std::abs(sum - 1.0) > 1e-6) {
-                spdlog::warn("Priors for character {} do not sum to 1 ({}), renormalizing.", c, sum);
-            }
-
-            for (size_t j = 0; j < max_alphabet_size; ++j) {
-                if (sum > 0) {
-                    recoded_priors[c][j] /= sum;
-                } else {
-                    recoded_priors[c][j] = 1.0 / max_alphabet_size;
+                for (size_t j = 0; j < max_alphabet_size; ++j) {
+                    if (sum > 0) {
+                        recoded_priors[c][j] /= sum;
+                    } else {
+                        recoded_priors[c][j] = 1.0 / max_alphabet_size;
+                    }
                 }
             }
+
+
         }
 
         result.num_characters = num_characters;

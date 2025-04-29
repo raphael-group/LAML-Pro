@@ -225,7 +225,7 @@ void print_likelihood_buffer(const std::string& label,
                              size_t num_characters,
                              size_t max_alphabet_size,
                              size_t num_nodes) {
-    spdlog::info("=== {} ===", label);
+    /*spdlog::info("=== {} ===", label);
     for (size_t c = 0; c < num_characters; ++c) {
         spdlog::info("Character {}", c);
         for (size_t n = 0; n < num_nodes; ++n) {
@@ -239,7 +239,7 @@ void print_likelihood_buffer(const std::string& label,
             spdlog::info("{}", oss.str());
         }
     }
-    spdlog::info("=======================");
+    spdlog::info("=======================");*/
 }
 
 em_results laml_expectation_maximization(
@@ -267,7 +267,7 @@ em_results laml_expectation_maximization(
         }
         //spdlog::info("laml_em character-matrix: num_missing = {}, num_not_missing = {}", num_missing, num_not_missing);
     } else {
-        spdlog::info("laml_em observation-matrix");
+        //spdlog::info("laml_em observation-matrix");
         for (size_t i = 0; i < model.observation_matrix.size(); ++i) {
             for (size_t j = 0; j < model.observation_matrix[i].size(); ++j) {
                 const std::vector<double>& probs = model.observation_matrix[i][j];
@@ -330,11 +330,11 @@ em_results laml_expectation_maximization(
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
         phylogeny::compute_outside_log_likelihood(model, t, edge_inside_ll, outside_ll, model_data);
 
-        if (verbose) {
+        /*if (verbose) {
             print_likelihood_buffer("Inside LL", inside_ll, num_characters, max_alphabet_size, t.num_nodes);
             print_likelihood_buffer("Edge Inside LL", edge_inside_ll, num_characters, max_alphabet_size, t.num_nodes);
             print_likelihood_buffer("Outside LL", outside_ll, num_characters, max_alphabet_size, t.num_nodes);
-        }
+        }*/
 
         std::vector<std::array<double, 6>> responsibilities(t.num_nodes);
         double leaf_responsibility = 0.0;
@@ -405,7 +405,11 @@ em_results laml_expectation_maximization(
         for (int character = 0; character < num_characters; ++character) {
             llh_after += likelihood[character];
         }
-
+        
+        /*const double tolerance = 1e-8;
+        if (llh_after < llh_before - tolerance) {
+            throw std::runtime_error("LLH decreased significantly in M-step.");
+        }*/
         if (llh_after < llh_before) { 
             throw std::runtime_error("LLH decreased in M-step.");
         }
