@@ -17,6 +17,7 @@ struct phylogeny_data {
     size_t max_alphabet_size;
     std::string data_type;  
     std::vector<std::vector<int>> character_matrix;   // [leaf_id][character]
+    std::vector<std::string> taxa_names;   
     std::vector<std::vector<std::vector<double>>> observation_matrix; // [leaf_id][character][probs]
     std::vector<std::vector<double>> mutation_priors; // [character][state]
 };
@@ -65,6 +66,10 @@ std::vector<std::tuple<int, int, double>> parse_mutation_priors(const std::strin
 std::vector<std::tuple<int, int, double>> generate_uniform_priors(
     const std::vector<std::vector<int>>& character_matrix, size_t num_characters
 );
+
+std::vector<std::tuple<int,int,double>> generate_uniform_priors(
+    const std::vector<std::vector<std::vector<double>>>& raw_matrix, size_t num_characters);
+
 enum class DataType {
     CharacterMatrix,
     ObservationMatrix

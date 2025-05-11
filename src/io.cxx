@@ -150,7 +150,6 @@ std::tuple<
         std::vector<std::string> col_names = reader.get_col_names();
 
         for (auto& row: reader) {
-            // column names are hard coded for now @TODO
             std::string taxon_name = row["cell_name"].get<std::string>();
             int cassette_idx = static_cast<int>(row["cassette_idx"].get<double>());
             int target_site = static_cast<int>(row["target_site"].get<double>());
@@ -171,11 +170,6 @@ std::tuple<
                     }
                 }
             }
-            //std::vector<double> state_probs(4, NEGATIVE_INFINITY);
-            //state_probs[0] = row["state0_prob"].get<double>();
-            //state_probs[1] = row["state1_prob"].get<double>();
-            //state_probs[2] = row["state2_prob"].get<double>();
-            //state_probs[3] = row["state3_prob"].get<double>();
 
             parsed_rows.emplace_back(taxon_name, character_key, state_probs);
             if (taxa_index_map.find(taxon_name) == taxa_index_map.end()) {
@@ -317,24 +311,17 @@ std::vector<std::tuple<int, int, double>> generate_uniform_priors(
     size_t num_characters
 ) {
     std::vector<std::tuple<int, int, double>> priors;
+    
+    // get the number of columns in raw_matrix, since this corresponds to the number of states
+    std::size_t states = raw_matrix.empty() ? 0 : raw_matrix[0][0].size()-1; // number of edit states
+    spdlog::info("Generating uniform priors for observation matrix w {} states...", states);
 
     for (size_t c = 0; c < num_characters; ++c) {
-        std::set<int> unique_states;
 
-        for (const auto& row : raw_matrix) {
-            if (c < row.size()) {
-                const auto& probs = row[c];
-                for (size_t s = 0; s < probs.size(); ++s) {
-                    if (probs[s] > 0.0) {
-                        unique_states.insert(static_cast<int>(s));
-                    }
-                }
-            }
-        }
-
-        double probability = 1.0 / unique_states.size();
-        for (int state : unique_states) {
+        double probability = 1.0 / states; // 1/(num edit states)
+        for (int state = 1; state < states+1; ++state) { // we have 4 states, edit states 1, 2, 3
             priors.emplace_back(c, state, probability);
+            // spdlog::info("character: {}, state: {}, prob: {}", c, state, probability);
         }
     }
 
@@ -365,7 +352,7 @@ void print_result_summary(const phylogeny_data& result) {
 
     spdlog::info("\nObservation matrix:");
     for (size_t i = 0; i < result.observation_matrix.size(); ++i) {
-        spdlog::info("  Taxon {}:", i);
+        spdlog::info("  Taxon {} w name {}:", i, result.taxa_names[i]);
         for (size_t j = 0; j < result.observation_matrix[i].size(); ++j) {
             std::ostringstream oss;
             oss << "    Character " << j << ": [";
@@ -380,7 +367,7 @@ void print_result_summary(const phylogeny_data& result) {
     spdlog::info("\nCharacter matrix:");
     for (size_t i = 0; i < result.character_matrix.size(); ++i) {
         std::ostringstream oss;
-        oss << "  Taxon " << i << ": [";
+        oss << "  Taxon " << i << " w name " << result.taxa_names[i] << ": [";
         for (size_t j = 0; j < result.character_matrix[i].size(); ++j) {
             oss << result.character_matrix[i][j];
             if (j + 1 < result.character_matrix[i].size()) oss << ", ";
@@ -403,7 +390,6 @@ phylogeny_data process_phylogeny_data(
     const tree& t, const std::string& character_matrix_file, 
     const std::string& mutation_priors_file,
     const std::string& data_type) {
-  
     std::vector<std::string> taxa_names;
     std::vector<std::pair<int, int>> character_keys;
     std::vector<std::vector<int>> raw_matrix;
@@ -435,7 +421,11 @@ phylogeny_data process_phylogeny_data(
     } else {
         spdlog::info("No mutation priors provided. Assuming uniform priors.");
         // overloaded tensor-compatible method 
-        raw_priors = generate_uniform_priors(raw_matrix, num_characters);
+        if (data_type == "character-matrix") {
+            raw_priors = generate_uniform_priors(raw_matrix, num_characters);
+        } else {
+            raw_priors = generate_uniform_priors(raw_tensor_matrix, num_characters);
+        }
     }
 
     phylogeny_data result;
@@ -491,6 +481,8 @@ phylogeny_data process_phylogeny_data(
         std::vector<std::vector<int>> reordered_matrix(t.num_leaves, std::vector<int>(num_characters));
         std::vector<bool> leaf_mapped(t.num_leaves, false);
         
+        std::vector<std::string> leaf_names_record(t.num_leaves);
+
         for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
             if (t.tree.out_degree(node_id) == 0) { // for each leaf node
                 size_t leaf_id = t.tree[node_id].data; // get leaf_id in tree
@@ -500,6 +492,7 @@ phylogeny_data process_phylogeny_data(
                 }
                 
                 const std::string& leaf_name = t.node_names[leaf_id]; // retrieve the leaf name
+                leaf_names_record[leaf_id] = leaf_name;
                 
                 if (taxa_name_to_idx.find(leaf_name) == taxa_name_to_idx.end()) {
                     throw std::runtime_error("Taxon name from tree not found in character matrix: " + leaf_name);
@@ -520,6 +513,7 @@ phylogeny_data process_phylogeny_data(
                 spdlog::warn("Leaf {} not mapped to any taxon in character matrix", i);
             }
         }
+        
         
         // std::vector<std::tuple<int, int, double>> raw_priors; need to transform raw_priors
         std::vector<std::vector<double>> recoded_priors(num_characters, std::vector<double>(max_alphabet_size, 0.0));
@@ -550,6 +544,7 @@ phylogeny_data process_phylogeny_data(
             }
 
             // It's possible that there are no edits observed at a given state
+            // raw_priors is empty if no priors file was provided since character_matrix is empty
             if (sum <= 0) {
                 spdlog::warn("Priors for character {} are all zero.", c);
                 //spdlog::error("Priors for character {} are all zero.", c);
@@ -567,8 +562,6 @@ phylogeny_data process_phylogeny_data(
                     }
                 }
             }
-
-
         }
 
         result.num_characters = num_characters;
@@ -576,6 +569,7 @@ phylogeny_data process_phylogeny_data(
         result.character_matrix = reordered_matrix;
         result.mutation_priors = recoded_priors;
         result.data_type = data_type;
+        result.taxa_names = leaf_names_record; // taxa_names;
         print_result_summary(result); 
 
     } else {
@@ -591,6 +585,7 @@ phylogeny_data process_phylogeny_data(
             std::vector<std::vector<double>>(num_characters, std::vector<double>(max_alphabet_size - 1, 0.0))
         );
         std::vector<bool> leaf_mapped(t.num_leaves, false);
+        std::vector<std::string> leaf_names_record(t.num_leaves);
         
         for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
             if (t.tree.out_degree(node_id) == 0) {
@@ -601,6 +596,7 @@ phylogeny_data process_phylogeny_data(
                 }
                 
                 const std::string& leaf_name = t.node_names[leaf_id];
+                leaf_names_record[leaf_id] = leaf_name;
                 
                 if (taxa_name_to_idx.find(leaf_name) == taxa_name_to_idx.end()) {
                     throw std::runtime_error("Taxon name from tree not found in character matrix: " + leaf_name);
@@ -629,12 +625,11 @@ phylogeny_data process_phylogeny_data(
             if (character < 0 || character >= static_cast<int>(num_characters)) {
                 throw std::runtime_error("Character index out of range in mutation priors: " + std::to_string(character));
             }
-            
             if (orig_state <= 0) {
                 continue; // skip states 0 and -1
             }
-            
-            recoded_priors[character][orig_state-1] = probability;
+            recoded_priors[character][orig_state-1] = probability; // we have to move them all back by an index
+                                                                   // even though we don't have state 0
         }
 
         for (size_t c = 0; c < num_characters; ++c) {
@@ -642,9 +637,7 @@ phylogeny_data process_phylogeny_data(
             for (size_t j = 0; j < max_alphabet_size; ++j) {
                 sum += recoded_priors[c][j];
             }
-
             if (sum <= 0.0) {
-                spdlog::error("Priors for character {} are all zero.", c);
                 spdlog::warn("Priors for character " + std::to_string(c) + " are all zero.");
                 double uniform_prob = 1.0 / static_cast<double>(max_alphabet_size);  // max_alphabet_size is num edit states
                 for (size_t j = 0; j < max_alphabet_size; ++j) { // priors are only for edit states
@@ -658,10 +651,11 @@ phylogeny_data process_phylogeny_data(
         }
 
         result.num_characters = num_characters;
-        result.max_alphabet_size = max_alphabet_size; // hard coded for now @TODO: number of edited states
-        result.observation_matrix = raw_tensor_matrix;
+        result.max_alphabet_size = max_alphabet_size; 
+        result.observation_matrix = reordered_tensor_matrix;
         result.mutation_priors = recoded_priors;
         result.data_type = data_type;
+        result.taxa_names = leaf_names_record;
         print_result_summary(result); 
 
     }

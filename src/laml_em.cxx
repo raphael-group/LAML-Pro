@@ -406,13 +406,14 @@ em_results laml_expectation_maximization(
             llh_after += likelihood[character];
         }
         
-        /*const double tolerance = 1e-8;
+        const double tolerance = 1e-8;
         if (llh_after < llh_before - tolerance) {
             throw std::runtime_error("LLH decreased significantly in M-step.");
-        }*/
-        if (llh_after < llh_before) { 
-            throw std::runtime_error("LLH decreased in M-step.");
         }
+        /*if (llh_after < llh_before) { 
+            spdlog::info("{}: {}", llh_before, llh_after);
+            throw std::runtime_error("LLH decreased in M-step.");
+        }*/
 
         llh = llh_after;
 

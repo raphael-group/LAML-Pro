@@ -52,7 +52,7 @@ void write_tree(std::string newick_tree, const std::string& filename) {
 }
 
 void write_em_results(const tree& t, const std::string& prefix, const em_results& em_res, 
-        const laml_model& model, const std::string& command) {
+        const laml_model& model, const std::string& command, const double runtime) {
     size_t num_characters = em_res.posterior_llh.size();
     size_t num_nodes = em_res.posterior_llh[0].size();
 
@@ -125,6 +125,7 @@ void write_em_results(const tree& t, const std::string& prefix, const em_results
     output_json["log_likelihood"] = em_res.log_likelihood;
     output_json["command"] = command;
     output_json["git_commit"] = GIT_COMMIT_HASH;
+    output_json["runtime_ms"] = runtime;
 
     FILE* jout = std::fopen((prefix + "_results.json").c_str(), "w");
     if (!jout) {
@@ -150,6 +151,7 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
         t.branch_lengths[i] = dist(gen);
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
     // label internal nodes in t
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (node_id >= t.node_names.size() || t.node_names[node_id].empty()) {
@@ -162,6 +164,10 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
 
     laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    spdlog::info("Total runtime: {} ms", runtime);
 
     auto newick_tree = write_newick_tree(t);
     write_tree(newick_tree, output_prefix + "_tree.newick");
@@ -171,7 +177,7 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     newick_tree = write_newick_tree(t);
     write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
 
-    write_em_results(t, output_prefix, em_res, model, command);
+    write_em_results(t, output_prefix, em_res, model, command, runtime);
 
     spdlog::info("Optimization completed. Log likelihood: {}", em_res.log_likelihood);
 }
@@ -325,7 +331,7 @@ void search_optimal_tree(
     newick_tree = write_newick_tree(t);
     write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
     
-    write_em_results(t, output_prefix, em_res, model, command);
+    write_em_results(t, output_prefix, em_res, model, command, runtime);
     
     spdlog::info("Tree search and optimization completed. Log likelihood: {}", em_res.log_likelihood);
 }
@@ -367,6 +373,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("-d", "--data-type")
         .help("String. Options are 'character-matrix' or 'observation-matrix'.")
+        .nargs(1)
         .default_value(std::string("character-matrix")); 
 
     program.add_argument("-t", "--tree")
@@ -404,7 +411,8 @@ int main(int argc, char** argv) {
 
     program.add_argument("--temp")
         .help("Temperature for simulated annealing")
-        .default_value(0.001)
+        .default_value(0.0000001)
+        //.default_value(0.001)
         .scan<'g', double>();
 
     try {
@@ -441,12 +449,14 @@ int main(int argc, char** argv) {
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (node_id != t.root_id && t.tree.in_degree(node_id) != 1) {
             is_binary = false;
+            spdlog::error("Input tree is not rooted with a node of in-degree 1.");
             break;
         }
         
         size_t out_degree = t.tree.out_degree(node_id);
         if (out_degree != 0 && out_degree != 2) {
             is_binary = false;
+            spdlog::error("Input tree has nodes which are not of degree either 0 or 2.");
             break;
         }
     }
@@ -456,7 +466,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    spdlog::info("Processing character matrix and mutation priors...");
+    spdlog::info("Processing matrix and mutation priors...");
 
     phylogeny_data data = process_phylogeny_data(
         t, 
