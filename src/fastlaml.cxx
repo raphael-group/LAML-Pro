@@ -56,66 +56,67 @@ void write_em_results(const tree& t, const std::string& prefix, const em_results
     size_t num_characters = em_res.posterior_llh.size();
     size_t num_nodes = em_res.posterior_llh[0].size();
 
-    // --- Posterior Matrix ---
-    FILE* out = std::fopen((prefix + "_posterior_probs.csv").c_str(), "w");
-    if (!out) {
-        spdlog::error("Failed to open output file for posterior matrix.");
-        return;
-    }
-
-    std::fprintf(out, "node");
-    for (size_t c = 0; c < num_characters; ++c)
-        std::fprintf(out, ",character_%zu", c);
-    std::fprintf(out, "\n");
-
-    for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
-        spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
-        std::fprintf(out, "%s", t.node_names[node_id].c_str());
-        for (size_t c = 0; c < num_characters; ++c) {
-            std::ostringstream cell;
-            size_t alphabet_size = em_res.posterior_llh[c][node_id].size();
-            for (size_t s = 0; s < alphabet_size; ++s) {
-                int state_label = static_cast<int>(s) - 1;
-                cell << state_label << ":" << std::fixed << std::setprecision(6) << em_res.posterior_llh[c][node_id][s];
-                if (s + 1 < alphabet_size) cell << "/";
-            }
-            std::fprintf(out, ",%s", cell.str().c_str());
+    if (model.data_type == "observation-matrix") {
+        // --- Posterior Matrix ---
+        FILE* out = std::fopen((prefix + "_posterior_probs.csv").c_str(), "w");
+        if (!out) {
+            spdlog::error("Failed to open output file for posterior matrix.");
+            return;
         }
+
+        std::fprintf(out, "node");
+        for (size_t c = 0; c < num_characters; ++c)
+            std::fprintf(out, ",character_%zu", c);
         std::fprintf(out, "\n");
-    }
-    std::fclose(out);
-    spdlog::info("Posterior matrix written to {}_posterior_probs.csv", prefix);
 
-    // --- Argmax Matrix ---
-    FILE* out2 = std::fopen((prefix + "_posterior_argmax.csv").c_str(), "w");
-    if (!out2) {
-        spdlog::error("Failed to open output file for argmax matrix.");
-        return;
-    }
-    std::string newick_tree = write_newick_tree(t) + ";";  // Assuming your tree object has this method
-    std::fprintf(out2, "Newick Tree:\n%s\n", newick_tree.c_str());
-
-    std::fprintf(out2, "node");
-    for (size_t c = 0; c < num_characters; ++c)
-        std::fprintf(out2, ",character_%zu", c);
-    std::fprintf(out2, "\n");
-
-    for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
-        spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
-        std::fprintf(out2, "%s", t.node_names[node_id].c_str());
-        for (size_t c = 0; c < num_characters; ++c) {
-            const auto& probs = em_res.posterior_llh[c][node_id];
-            auto max_it = std::max_element(probs.begin(), probs.end());
-            size_t best_index = std::distance(probs.begin(), max_it);
-            int state_label = static_cast<int>(best_index) - 1;
-            std::fprintf(out2, ",%d", state_label);
+        for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
+            spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
+            std::fprintf(out, "%s", t.node_names[node_id].c_str());
+            for (size_t c = 0; c < num_characters; ++c) {
+                std::ostringstream cell;
+                size_t alphabet_size = em_res.posterior_llh[c][node_id].size();
+                for (size_t s = 0; s < alphabet_size; ++s) {
+                    int state_label = static_cast<int>(s) - 1;
+                    cell << state_label << ":" << std::fixed << std::setprecision(6) << em_res.posterior_llh[c][node_id][s];
+                    if (s + 1 < alphabet_size) cell << "/";
+                }
+                std::fprintf(out, ",%s", cell.str().c_str());
+            }
+            std::fprintf(out, "\n");
         }
+        std::fclose(out);
+        spdlog::info("Posterior matrix written to {}_posterior_probs.csv", prefix);
+
+        // --- Argmax Matrix ---
+        FILE* out2 = std::fopen((prefix + "_posterior_argmax.csv").c_str(), "w");
+        if (!out2) {
+            spdlog::error("Failed to open output file for argmax matrix.");
+            return;
+        }
+        std::string newick_tree = write_newick_tree(t) + ";";  // Assuming your tree object has this method
+        std::fprintf(out2, "Newick Tree:\n%s\n", newick_tree.c_str());
+
+        std::fprintf(out2, "node");
+        for (size_t c = 0; c < num_characters; ++c)
+            std::fprintf(out2, ",character_%zu", c);
         std::fprintf(out2, "\n");
+
+        for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
+            spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
+            std::fprintf(out2, "%s", t.node_names[node_id].c_str());
+            for (size_t c = 0; c < num_characters; ++c) {
+                const auto& probs = em_res.posterior_llh[c][node_id];
+                auto max_it = std::max_element(probs.begin(), probs.end());
+                size_t best_index = std::distance(probs.begin(), max_it);
+                int state_label = static_cast<int>(best_index) - 1;
+                std::fprintf(out2, ",%d", state_label);
+            }
+            std::fprintf(out2, "\n");
+        }
+
+        std::fclose(out2);
+        spdlog::info("Argmax matrix written to {}_posterior_argmax.csv", prefix);
     }
-
-    std::fclose(out2);
-    spdlog::info("Argmax matrix written to {}_posterior_argmax.csv", prefix);
-
 
     // --- JSON Summary ---
     json output_json; // need to pass in command, model
