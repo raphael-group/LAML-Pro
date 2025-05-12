@@ -57,6 +57,7 @@ void write_em_results(const tree& t, const std::string& prefix, const em_results
     size_t num_nodes = em_res.posterior_llh[0].size();
 
     if (model.data_type == "observation-matrix") {
+        spdlog::info("data_type: observation-matrix, writing posterior probs and argmax probs.");
         // --- Posterior Matrix ---
         FILE* out = std::fopen((prefix + "_posterior_probs.csv").c_str(), "w");
         if (!out) {
