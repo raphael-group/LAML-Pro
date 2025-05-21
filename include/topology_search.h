@@ -59,41 +59,53 @@ void stochastically_perturb_tree(
 }
 
 template<typename D>
-std::vector<std::pair<nni, double>> evaluate_nnis(
-    const std::function<double(tree&, D&)>& scoring_function, 
-    tree& t,
-    D& model,
-    const std::vector<nni>& nni_moves,
-    std::atomic<int>& nni_counter,
-    int total_nni_moves
-) {
+double evaluate_single_nni(const std::function<double(tree&, D&)>& scoring_function,
+                           tree&                           t,
+                           D&                              model,
+                           const nni&                      move)
+{
+    auto [u, v]  = move;
+    int parent_u = t.tree.predecessors(u)[0];
+    int parent_v = t.tree.predecessors(v)[0];
+
+    // apply move
+    t.tree.remove_edge(parent_u, u);
+    t.tree.remove_edge(parent_v, v);
+    t.tree.add_edge(parent_u, v);
+    t.tree.add_edge(parent_v, u);
+
+    // score current topology
+    double log_likelihood = scoring_function(t, model);
+
+    // revert move
+    t.tree.remove_edge(parent_u, v);
+    t.tree.remove_edge(parent_v, u);
+    t.tree.add_edge(parent_u, u);
+    t.tree.add_edge(parent_v, v);
+
+    return log_likelihood;
+}
+
+template<typename D>
+std::vector<std::pair<nni, double>>
+evaluate_nnis(const std::function<double(tree&, D&)>& scoring_function,
+              tree&                                   t,
+              D&                                      model,
+              const std::vector<nni>&                 nni_moves,
+              std::atomic<int>&                       nni_counter,
+              int                                     total_nni_moves)
+{
     std::vector<std::pair<nni, double>> evaluations;
-    for (const nni& move : nni_moves) {
+    evaluations.reserve(nni_moves.size());
+
+    for (const auto& move : nni_moves) {
         if (nni_counter % 100 == 1) {
             spdlog::info("Evaluated {}/{} NNI moves", nni_counter.load(), total_nni_moves);
         }
 
-        // perform NNI move
-        auto [u, v] = move;
-        int parent_u = t.tree.predecessors(u)[0];
-        int parent_v = t.tree.predecessors(v)[0];
-
-        t.tree.remove_edge(parent_u, u);
-        t.tree.remove_edge(parent_v, v);
-        t.tree.add_edge(parent_u, v);
-        t.tree.add_edge(parent_v, u);
-
-        double log_likelihood = scoring_function(t, model);
-        evaluations.push_back({move, log_likelihood});
-
-        // revert NNI move
-        t.tree.remove_edge(parent_u, v);
-        t.tree.remove_edge(parent_v, u);
-        t.tree.add_edge(parent_u, u);
-        t.tree.add_edge(parent_v, v);
-
-        // revert model parameters
-        nni_counter++;
+        double score = evaluate_single_nni(scoring_function, t, model, move);
+        evaluations.emplace_back(move, score);
+        ++nni_counter;
     }
 
     return evaluations;

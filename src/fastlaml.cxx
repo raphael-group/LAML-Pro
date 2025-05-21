@@ -183,6 +183,91 @@ hill_climbing_result greedy_hill_climbing(
     return {best_tree, best_log_likelihood, iteration, log_likelihoods};
 }
 
+hill_climbing_result simulated_annealing(
+    const tree& initial_tree, 
+    const phylogeny_data& data, 
+    double inital_phi, 
+    double initial_nu, 
+    unsigned int max_iterations,
+    unsigned int num_threads,
+    double temp = 0.00001
+) {
+    tree current_tree = initial_tree;
+    laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
+    auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
+    double current_log_likelihood = initial_result.log_likelihood;
+    
+    spdlog::info("Starting simulated annealing with initial log likelihood: {}", current_log_likelihood);
+    
+    size_t iteration = 0;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::vector<double> log_likelihoods;
+    log_likelihoods.push_back(current_log_likelihood);
+
+    // assigns a uniform weight to each nni
+    int nni_neighborhood_size = compute_nni_neighborhood(current_tree).size();
+    std::vector<double> nni_weights(nni_neighborhood_size, 1.0);
+    std::discrete_distribution<> nni_sampler(nni_weights.begin(), nni_weights.end());
+
+    std::uniform_real_distribution<> annealing_sampler(0, 1);
+    while (iteration < max_iterations) {        
+        std::vector<nni> neighborhood = compute_nni_neighborhood(current_tree);
+        nni sampled_move = neighborhood[nni_sampler(gen)];
+
+        auto [u, v]  = sampled_move;
+        int parent_u = current_tree.tree.predecessors(u)[0];
+        int parent_v = current_tree.tree.predecessors(v)[0];
+
+        // apply move
+        current_tree.tree.remove_edge(parent_u, u);
+        current_tree.tree.remove_edge(parent_v, v);
+        current_tree.tree.add_edge(parent_u, v);
+        current_tree.tree.add_edge(parent_v, u);
+
+        // score current topology
+        auto blens = current_tree.branch_lengths;
+        auto params = model.parameters;
+
+        double move_log_likelihood = laml_expectation_maximization(current_tree, model, 100, false).log_likelihood;
+        double proposal = std::exp(((move_log_likelihood  - current_log_likelihood) / (temp * std::abs(current_log_likelihood))));
+
+        if (proposal > annealing_sampler(gen)) {
+            current_log_likelihood = move_log_likelihood;
+
+            spdlog::info(
+                "Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, current phi: {}, current nu: {}",
+                iteration, sampled_move.u, sampled_move.v, current_log_likelihood, model.parameters[0], model.parameters[1]
+            ); 
+        } else {
+            spdlog::info(
+                "Iteration {}: Rejected NNI move ({}, {}), proposed log likelihood: {}", 
+                iteration, sampled_move.u, sampled_move.v, current_log_likelihood
+            );
+
+            // revert move 
+            current_tree.tree.remove_edge(parent_u, v);
+            current_tree.tree.remove_edge(parent_v, u);
+            current_tree.tree.add_edge(parent_u, u);
+            current_tree.tree.add_edge(parent_v, v);
+
+            // revert parameter changes
+            current_tree.branch_lengths = blens;
+            model.parameters = params;
+        }        
+
+        log_likelihoods.push_back(current_log_likelihood);
+        iteration++;
+    }
+    
+    spdlog::info("Simulated annealign completed after {} iterations. Final log likelihood: {}", 
+             iteration, current_log_likelihood);
+    
+    return {current_tree, current_log_likelihood, iteration, log_likelihoods};
+}
+
 void search_optimal_tree(
     tree& t, const phylogeny_data& data, unsigned int seed, 
     unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp
@@ -199,7 +284,7 @@ void search_optimal_tree(
     double initial_nu = dist(gen);
 
     // perform hill climbing
-    auto result = greedy_hill_climbing(t, data, initial_phi, initial_nu, max_iterations, num_threads, 0.1, temp);
+    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, temp);
     t = result.best_tree;
 
     initial_phi = dist(gen);
@@ -314,7 +399,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("--temp")
         .help("Temperature for simulated annealing")
-        .default_value(0.001)
+        .default_value(0.00001)
         .scan<'g', double>();
 
     try {
