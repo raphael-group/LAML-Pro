@@ -12,6 +12,9 @@
 
 #include <nlopt.hpp>
 
+#define BRANCH_LENGTH_LB (1e-5)
+#define BRANCH_LENGTH_UB (1e5)
+
 struct e_step_data {
     std::vector<std::array<double, 6>>& responsibilities;
     double leaf_responsibility;
@@ -241,12 +244,22 @@ em_results laml_expectation_maximization(
     likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
 
+    for (size_t i = 0; i < t.num_nodes; i++) {
+        if (std::abs(t.branch_lengths[i] - BRANCH_LENGTH_LB) < 1e-9) {
+            t.branch_lengths[i] = BRANCH_LENGTH_LB + 1e-9;
+        }
+
+        if (std::abs(t.branch_lengths[i] - BRANCH_LENGTH_UB) < 1e-9) {
+            t.branch_lengths[i] = BRANCH_LENGTH_UB - 1e-9;
+        }
+    }
+
     // set up the M-step solver
     nlopt::opt opt(nlopt::LD_CCSAQ, t.num_nodes + 2);
     
     std::vector<double> params(t.num_nodes + 2);
-    std::vector<double> lb(t.num_nodes + 2, 1e-5);
-    std::vector<double> ub(t.num_nodes + 2, 1e5);
+    std::vector<double> lb(t.num_nodes + 2, BRANCH_LENGTH_LB);
+    std::vector<double> ub(t.num_nodes + 2, BRANCH_LENGTH_UB);
     ub[1] = 1.0 - 1e-5; // phi in [0, 1]
     
     opt.set_lower_bounds(lb);
