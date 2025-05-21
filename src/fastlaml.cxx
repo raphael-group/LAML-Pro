@@ -394,7 +394,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("--max-iterations")
         .help("Maximum number of iterations for hill climbing")
-        .default_value(100U)
+        .default_value(20000U)
         .scan<'u', unsigned int>();
 
     program.add_argument("--temp")
