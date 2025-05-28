@@ -4,6 +4,7 @@
 struct em_results {
     double log_likelihood;
     int num_iterations;
+    std::vector<std::vector<std::vector<double>>> posterior_llh;
 };
 
 void laml_expectation_step(
@@ -24,3 +25,10 @@ em_results laml_expectation_maximization(
     int max_em_iterations = 100,
     bool verbose = false
 );
+
+void print_likelihood_buffer(const std::string& label,
+                             const likelihood_buffer& buf,
+                             size_t num_characters,
+                             size_t max_alphabet_size,
+                             size_t num_nodes);
+

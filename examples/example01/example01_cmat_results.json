@@ -1,0 +1,8 @@
+{
+    "command": "./src/fastlaml --mode optimize -t ../examples/example01/starting.tree -c ../examples/example01/character_matrix.csv -o ../examples/example01/example01_cmat -v -m ../examples/example01/priors.csv",
+    "em_iterations": 41,
+    "git_commit": "15b3957e89068b5107476137b19b88a42190bc4b",
+    "log_likelihood": -1.1789540044940312,
+    "nu": 1e-05,
+    "phi": 0.3247865183650181
+}

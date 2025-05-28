@@ -34,6 +34,7 @@ with open(args.results, 'r') as f:
     sns.lineplot(x='Iteration', y='Log Likelihood', data=plot_data, linewidth=1.0, color='orange')
     
     # Add horizontal line at initial value
+    plt.axhline(y=-9703.652703451333, color='black', linestyle='--', alpha=0.7, linewidth=1)
     plt.axhline(y=initial_ll, color='black', linestyle='--', alpha=0.7, linewidth=1)
     
     plt.title('Log Likelihood vs Iteration')

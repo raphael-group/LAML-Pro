@@ -333,7 +333,7 @@ def main(mode, phylo_opt):
             )
 
         start = time.time()
-        optimize_helper(False)[0] # warm start jit compiled functions
+        optimize_helper(True)[0] # warm start jit compiled functions
         end = time.time()
         compile_time = end - start
 

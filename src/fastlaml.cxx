@@ -26,10 +26,126 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/fmt/ostr.h>
 
+#include <spdlog/sinks/basic_file_sink.h>
+
 #define FASTLAML_VERSION_MAJOR 1
 #define FASTLAML_VERSION_MINOR 0
+#ifndef GIT_COMMIT_HASH
+#define GIT_COMMIT_HASH "unknown"
+#endif
+
+std::string command;
 
 using json = nlohmann::json;
+
+void write_tree(std::string newick_tree, const std::string& filename) {
+    FILE* out = std::fopen(filename.c_str(), "w");
+    if (!out) {
+        spdlog::error("Could not open file for writing: {}", filename);
+        return;
+    }
+
+    std::fprintf(out, "%s", newick_tree.c_str());
+    std::fclose(out);
+
+    spdlog::info("Optimized tree written to {}", filename);
+}
+
+void write_results(
+    const tree& t, 
+    const std::string& prefix, 
+    const em_results& em_res,
+    const laml_model& model, 
+    const std::string& command, 
+    const double runtime,
+    const std::vector<double>& log_likelihoods
+) {
+    size_t num_characters = em_res.posterior_llh.size();
+
+    if (model.data_type == "observation-matrix") {
+        spdlog::info("data_type: observation-matrix, writing posterior probs and argmax probs.");
+        // --- Posterior Matrix ---
+        FILE* out = std::fopen((prefix + "_posterior_probs.csv").c_str(), "w");
+        if (!out) {
+            spdlog::error("Failed to open output file for posterior matrix.");
+            return;
+        }
+
+        std::fprintf(out, "node");
+        for (size_t c = 0; c < num_characters; ++c)
+            std::fprintf(out, ",character_%zu", c);
+        std::fprintf(out, "\n");
+
+        for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
+            spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
+            std::fprintf(out, "%s", t.node_names[node_id].c_str());
+            for (size_t c = 0; c < num_characters; ++c) {
+                std::ostringstream cell;
+                size_t alphabet_size = em_res.posterior_llh[c][node_id].size();
+                for (size_t s = 0; s < alphabet_size; ++s) {
+                    int state_label = static_cast<int>(s) - 1;
+                    cell << state_label << ":" << std::fixed << std::setprecision(6) << em_res.posterior_llh[c][node_id][s];
+                    if (s + 1 < alphabet_size) cell << "/";
+                }
+                std::fprintf(out, ",%s", cell.str().c_str());
+            }
+            std::fprintf(out, "\n");
+        }
+        std::fclose(out);
+        spdlog::info("Posterior matrix written to {}_posterior_probs.csv", prefix);
+
+        // --- Argmax Matrix ---
+        FILE* out2 = std::fopen((prefix + "_posterior_argmax.csv").c_str(), "w");
+        if (!out2) {
+            spdlog::error("Failed to open output file for argmax matrix.");
+            return;
+        }
+        std::string newick_tree = write_newick_tree(t) + ";";  // Assuming your tree object has this method
+        std::fprintf(out2, "Newick Tree:\n%s\n", newick_tree.c_str());
+
+        std::fprintf(out2, "node");
+        for (size_t c = 0; c < num_characters; ++c)
+            std::fprintf(out2, ",character_%zu", c);
+        std::fprintf(out2, "\n");
+
+        for (size_t node_id = 0; node_id < t.node_names.size(); ++node_id) {
+            spdlog::debug("node_id = {}, name = {}", node_id, t.node_names[node_id]);
+            std::fprintf(out2, "%s", t.node_names[node_id].c_str());
+            for (size_t c = 0; c < num_characters; ++c) {
+                const auto& probs = em_res.posterior_llh[c][node_id];
+                auto max_it = std::max_element(probs.begin(), probs.end());
+                size_t best_index = std::distance(probs.begin(), max_it);
+                int state_label = static_cast<int>(best_index) - 1;
+                std::fprintf(out2, ",%d", state_label);
+            }
+            std::fprintf(out2, "\n");
+        }
+
+        std::fclose(out2);
+        spdlog::info("Argmax matrix written to {}_posterior_argmax.csv", prefix);
+    }
+
+    // --- JSON Summary ---
+    json output_json; // need to pass in command, model
+    output_json["phi"] = model.parameters[1];
+    output_json["nu"] = model.parameters[0];
+    output_json["em_iterations"] = em_res.num_iterations;
+    output_json["best_log_likelihood"] = em_res.log_likelihood;
+    output_json["command"] = command;
+    output_json["git_commit"] = GIT_COMMIT_HASH;
+    output_json["runtime_ms"] = runtime;
+    output_json["log_likelihoods"] = log_likelihoods;
+
+    FILE* jout = std::fopen((prefix + "_results.json").c_str(), "w");
+    if (!jout) {
+        spdlog::error("Could not open file to write JSON results: {}_results.json", prefix);
+    } else {
+        std::string serialized = output_json.dump(4);  // pretty-printed
+        std::fprintf(jout, "%s\n", serialized.c_str());
+        std::fclose(jout);
+        spdlog::info("JSON summary written to {}_results.json", prefix);
+    }
+}
 
 void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
     spdlog::info("Optimizing model parameters and branch lengths...");
@@ -42,46 +158,34 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     for (size_t i = 0; i < t.branch_lengths.size(); ++i) {
         t.branch_lengths[i] = dist(gen);
     }
-    
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+
+    auto start = std::chrono::high_resolution_clock::now();
+    // label internal nodes in t
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id >= t.node_names.size() || t.node_names[node_id].empty()) {
+            if (node_id >= t.node_names.size()) {
+                t.node_names.resize(t.num_nodes);  // Ensure size matches num_nodes
+            }
+            t.node_names[node_id] = "internal_" + std::to_string(node_id);
+        }
+    }
+
+    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    spdlog::info("Total runtime: {} ms", runtime);
 
     auto newick_tree = write_newick_tree(t);
-    std::ofstream output_file(output_prefix + "_tree.newick");
-    if (output_file.is_open()) {
-        output_file << newick_tree;
-        output_file.close();
-        spdlog::info("Optimized tree written to {}", output_prefix + "_tree.newick");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
-    }
+    write_tree(newick_tree, output_prefix + "_tree.newick");
 
     spdlog::info("Fitting branch lengths to ultrametric tree...");
     ultrametric_projection(t);
     newick_tree = write_newick_tree(t);
-    output_file.open(output_prefix + "_ultrametric_tree.newick");
-    if (output_file.is_open()) {
-        output_file << newick_tree;
-        output_file.close();
-        spdlog::info("Ultrametric tree written to {}", output_prefix + "_ultrametric_tree.newick");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_ultrametric_tree.newick");
-    }
+    write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
 
-    json output_json;
-    output_json["phi"] = model.parameters[1];
-    output_json["nu"] = model.parameters[0];
-    output_json["em_iterations"] = em_res.num_iterations;
-    output_json["log_likelihood"] = em_res.log_likelihood;
-
-    std::ofstream json_file(output_prefix + "_results.json");
-    if (json_file.is_open()) {
-        json_file << output_json.dump(4);
-        json_file.close();
-        spdlog::info("Optimization results written to {}", output_prefix + "_results.json");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_results.json");
-    }
+    write_results(t, output_prefix, em_res, model, command, runtime, std::vector<double>());
 
     spdlog::info("Optimization completed. Log likelihood: {}", em_res.log_likelihood);
 }
@@ -96,7 +200,7 @@ struct hill_climbing_result {
 hill_climbing_result greedy_hill_climbing(
     const tree& initial_tree, 
     const phylogeny_data& data, 
-    double inital_phi, 
+    double initial_phi,  // fixed typo
     double initial_nu, 
     unsigned int max_iterations,
     unsigned int num_threads,
@@ -104,7 +208,7 @@ hill_climbing_result greedy_hill_climbing(
     double temp = 0.1
 ) {
     tree best_tree = initial_tree;
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
     double best_log_likelihood = initial_result.log_likelihood;
     
@@ -155,7 +259,6 @@ hill_climbing_result greedy_hill_climbing(
         std::discrete_distribution<> dist(weights.begin(), weights.end());
         auto selected_move_index = dist(gen);
         auto selected_move = filtered_neighborhood[selected_move_index].first;
-        auto selected_move_likelihood = filtered_neighborhood[selected_move_index].second;
        
         int parent_u = best_tree.tree.predecessors(selected_move.u)[0];
         int parent_v = best_tree.tree.predecessors(selected_move.v)[0];
@@ -193,7 +296,7 @@ hill_climbing_result simulated_annealing(
     double temp = 0.00001
 ) {
     tree current_tree = initial_tree;
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, inital_phi, initial_nu);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type);
     auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
     double current_log_likelihood = initial_result.log_likelihood;
     
@@ -262,7 +365,7 @@ hill_climbing_result simulated_annealing(
         iteration++;
     }
     
-    spdlog::info("Simulated annealign completed after {} iterations. Final log likelihood: {}", 
+    spdlog::info("Simulated annealing completed after {} iterations. Final log likelihood: {}", 
              iteration, current_log_likelihood);
     
     return {current_tree, current_log_likelihood, iteration, log_likelihoods};
@@ -289,55 +392,37 @@ void search_optimal_tree(
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model = laml_model(data.character_matrix, data.mutation_priors, initial_phi, initial_nu);
+    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
     auto em_res = laml_expectation_maximization(t, model, 100, false);
-    double current_phi = model.parameters[1];
-    double current_nu = model.parameters[0];
+    
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
 
     auto end = std::chrono::high_resolution_clock::now();
     double runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     spdlog::info("Total runtime: {} ms", runtime);
+    
+    // label internal nodes in t
+    for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
+        if (node_id >= t.node_names.size() || t.node_names[node_id].empty()) {
+            if (node_id >= t.node_names.size()) {
+                t.node_names.resize(t.num_nodes);  // Ensure size matches num_nodes
+            }
+            t.node_names[node_id] = "internal_" + std::to_string(node_id);
+        }
+    }
 
     spdlog::info("Writing best tree to file...");
-    std::string newick_tree = write_newick_tree(t);
-    std::ofstream output_file(output_prefix + "_tree.newick");
-    if (output_file.is_open()) {
-        output_file << newick_tree;
-        output_file.close();
-        spdlog::info("Best tree written to {}", output_prefix + "_tree.newick");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_tree.newick");
-    }
+    auto newick_tree = write_newick_tree(t);
+    write_tree(newick_tree, output_prefix + "_tree.newick");
 
     spdlog::info("Fitting branch lengths to ultrametric tree...");
     ultrametric_projection(t);
     newick_tree = write_newick_tree(t);
-    output_file.open(output_prefix + "_ultrametric_tree.newick");
-    if (output_file.is_open()) {
-        output_file << newick_tree;
-        output_file.close();
-        spdlog::info("Ultrametric tree written to {}", output_prefix + "_ultrametric_tree.newick");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_ultrametric_tree.newick");
-    }
-
-    json output_json;
-    output_json["phi"] = current_phi;
-    output_json["nu"] = current_nu;
-    output_json["log_likelihood"] = em_res.log_likelihood;
-    output_json["runtime"] = runtime;
-    output_json["iterations"] = result.iterations;
-    output_json["log_likelihoods"] = result.log_likelihoods;
-
-    std::ofstream json_file(output_prefix + "_results.json");
-    if (json_file.is_open()) {
-        json_file << output_json.dump(4);
-        json_file.close();
-        spdlog::info("Search results written to {}", output_prefix + "_results.json");
-    } else {
-        spdlog::error("Could not open file for writing: {}", output_prefix + "_results.json");
-    }
+    write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
+    
+    write_results(t, output_prefix, em_res, model, command, runtime, result.log_likelihoods);
+    
+    spdlog::info("Tree search and optimization completed. Log likelihood: {}", em_res.log_likelihood);
 }
 
 int main(int argc, char** argv) {
@@ -350,6 +435,12 @@ int main(int argc, char** argv) {
         std::to_string(FASTLAML_VERSION_MAJOR) + "." + std::to_string(FASTLAML_VERSION_MINOR),
         argparse::default_arguments::help
     );
+    
+    command.clear();
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) command += " ";
+        command += argv[i];
+    }
 
     program.add_argument("--version")
         .action([&](const auto & /*unused*/) {
@@ -365,9 +456,14 @@ int main(int argc, char** argv) {
         .help("Path to the mutation priors file")
         .default_value(std::string(""));
 
-    program.add_argument("-c", "--character-matrix")
-        .help("Path to the character matrix file (CSV)")
+    program.add_argument("-c", "--matrix")
+        .help("Path to the matrix file (CSV)")
         .required();
+
+    program.add_argument("-d", "--data-type")
+        .help("String. Options are 'character-matrix' or 'observation-matrix'.")
+        .nargs(1)
+        .default_value(std::string("character-matrix")); 
 
     program.add_argument("-t", "--tree")
         .help("Path to the tree file")
@@ -376,6 +472,11 @@ int main(int argc, char** argv) {
     program.add_argument("-o", "--output")
         .help("Path to the output file")
         .required();
+    
+    program.add_argument("-v", "--verbose")
+        .help("Additionally save all console logs to a file automatically.")
+        .default_value(false)
+        .implicit_value(true);
 
     program.add_argument("--threads")
         .help("number of threads to use")
@@ -410,6 +511,24 @@ int main(int argc, char** argv) {
         std::exit(1);
     }
 
+    if (program.get<bool>("--verbose")) {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        console_sink->set_level(spdlog::level::info);
+
+        // Create file sink
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(program.get<std::string>("--output") + "_fastlaml.log", true);
+        file_sink->set_level(spdlog::level::info); // debug); // Log everything to file
+
+        // Combine them into a multi-sink logger
+        auto logger = std::make_shared<spdlog::logger>("multi_logger", spdlog::sinks_init_list{console_sink, file_sink});
+        spdlog::set_default_logger(logger);
+        spdlog::set_level(spdlog::level::info); // debug); // Set global log level
+        spdlog::info("Logger initialized");
+        spdlog::info("Command: {}", command);
+    
+    }
+
+
     spdlog::info("Loading tree from Newick file...");
     tree t = parse_newick_tree(program.get<std::string>("--tree"));
 
@@ -418,12 +537,14 @@ int main(int argc, char** argv) {
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (node_id != t.root_id && t.tree.in_degree(node_id) != 1) {
             is_binary = false;
+            spdlog::error("Input tree is not rooted with a node of in-degree 1.");
             break;
         }
         
         size_t out_degree = t.tree.out_degree(node_id);
         if (out_degree != 0 && out_degree != 2) {
             is_binary = false;
+            spdlog::error("Input tree has nodes which are not of degree either 0 or 2.");
             break;
         }
     }
@@ -433,12 +554,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    spdlog::info("Processing character matrix and mutation priors...");
+    spdlog::info("Processing matrix and mutation priors...");
 
     phylogeny_data data = process_phylogeny_data(
         t, 
-        program.get<std::string>("--character-matrix"),
-        program.get<std::string>("--mutation-priors")
+        program.get<std::string>("--matrix"),
+        program.get<std::string>("--mutation-priors"),
+        program.get<std::string>("--data-type")
     );
     
     unsigned int seed = program.get<unsigned int>("--seed");
