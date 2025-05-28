@@ -17,7 +17,7 @@
 
 #define BRANCH_LENGTH_LB (1e-5)
 #define BRANCH_LENGTH_UB (1e5)
-#define NEGATIVE_INFINITY 1e-7
+#define NEGATIVE_INFINITY (-1e7)
 
 struct e_step_data {
     std::vector<std::array<double, 6>>& responsibilities;
