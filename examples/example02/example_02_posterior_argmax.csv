@@ -1,0 +1,8 @@
+Newick Tree:
+((a:2.831776,b:2.831776)internal_4:0.960621,c:3.792397)internal_3:2.068846;;
+node,character_0,character_1
+a,1,1
+b,1,1
+c,1,1
+internal_3,1,1
+internal_4,1,1

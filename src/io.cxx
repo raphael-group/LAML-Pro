@@ -197,7 +197,7 @@ std::tuple<
     std::vector<std::vector<std::vector<double>>> matrix(
         taxa_names.size(), // num_taxa as rows, num columns (cassette_idx, target_site)
                            // num state probabilities 
-        std::vector<std::vector<double>>(character_keys.size(), std::vector<double>(4, 0.0))
+        std::vector<std::vector<double>>(character_keys.size(), std::vector<double>(4, NEGATIVE_INFINITY))
     );
 
     // fill in the matrix
@@ -582,7 +582,7 @@ phylogeny_data process_phylogeny_data(
 
         std::vector<std::vector<std::vector<double>>> reordered_tensor_matrix(
             t.num_leaves,
-            std::vector<std::vector<double>>(num_characters, std::vector<double>(max_alphabet_size - 1, 0.0))
+            std::vector<std::vector<double>>(num_characters, std::vector<double>(max_alphabet_size - 1, NEGATIVE_INFINITY))
         );
         std::vector<bool> leaf_mapped(t.num_leaves, false);
         std::vector<std::string> leaf_names_record(t.num_leaves);

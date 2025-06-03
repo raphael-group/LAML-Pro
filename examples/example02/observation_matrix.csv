@@ -1,0 +1,5 @@
+cell_name,cassette_idx,target_site,state0_prob,state1_prob,state2_prob,state3_prob
+a,0,0,-1e7,0,-1e7,-1e7
+a,0,1,-1e7,0,-1e7,-1e7
+b,0,0,-1e7,0,-1e7,-1e7
+c,0,0,-1e7,0,-1e7,-1e7

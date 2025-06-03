@@ -1,0 +1,10 @@
+{
+    "best_log_likelihood": -6.132010676076154,
+    "command": "./src/fastlaml -c ../examples/example02/observation_matrix.csv -d observation-matrix -t ../examples/example02/starting.tree -o ../examples/example02/example_02",
+    "em_iterations": 101,
+    "git_commit": "f6ca5514a853669124f9535fa501243685664d4d",
+    "log_likelihoods": [],
+    "nu": 0.004663846266144116,
+    "phi": 0.3247868957786502,
+    "runtime_ms": 6.0
+}

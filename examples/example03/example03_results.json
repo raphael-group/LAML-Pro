@@ -1,0 +1,10 @@
+{
+    "best_log_likelihood": -276355.1914577699,
+    "command": "./src/fastlaml -c ../examples/example03/k400_s134_sub100_r01_r0.1_p0.1_scores.format.csv -d observation-matrix -t ../examples/example03/k400_s134_sub100_r01_r0.1_p0.1_argmax.nj.nwk -o ../examples/example03/example03",
+    "em_iterations": 21,
+    "git_commit": "f6ca5514a853669124f9535fa501243685664d4d",
+    "log_likelihoods": [],
+    "nu": 0.2824711102669407,
+    "phi": 0.09290657233705275,
+    "runtime_ms": 1010.0
+}

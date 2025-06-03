@@ -276,6 +276,9 @@ em_results laml_expectation_maximization(
             }
         }
     }
+    if (verbose) {
+        spdlog::info("Num missing entries: {} Num not missing entries: {}", num_missing, num_not_missing);
+    }
 
     likelihood_buffer inside_ll(num_characters, max_alphabet_size, t.num_nodes);
     likelihood_buffer edge_inside_ll(num_characters, max_alphabet_size, t.num_nodes);
