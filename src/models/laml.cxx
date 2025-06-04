@@ -86,9 +86,6 @@ void laml_model::compute_taxa_log_inside_likelihood(
 ) const {
 
     if (this->data_type == "character-matrix") {
-
-        //std::cout << "[laml_model] compute_taxa_log_inside_likelihood character-matrix" << std::endl;
-        //spdlog::info("[laml_model] compute_taxa_log_inside_likelihood character-matrix");
         int state = this->character_matrix[taxa_id][character];
         
         std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
@@ -102,23 +99,9 @@ void laml_model::compute_taxa_log_inside_likelihood(
             result[state + 1] = d.log_one_minus_phi;
         }
     } else {
-
-        /*
-        std::cout << "[DEBUG] this->data_type " << this->data_type << std::endl;
-        std::cout << "[DEBUG] this->observation_matrix.size() " << this->observation_matrix.size() << std::endl;
-        std::cout << "[DEBUG] this->observation_matrix[taxa_id].size() " << this->observation_matrix[taxa_id].size() << std::endl;
-        std::cout << "[DEBUG] taxa_id " << taxa_id << std::endl;
-        std::cout << "[DEBUG] character " << character << std::endl;
-        */
-        //std::cout << "[laml_model] compute_taxa_log_inside_likelihood observation-matrix" << std::endl;
-        //spdlog::info("[laml_model] compute_taxa_log_inside_likelihood observation-matrix");
-
         const std::vector<double>& probs = this->observation_matrix[taxa_id][character];  // now a tensor
 
-        //std::cout << "[DEBUG] probs.size() = " << probs.size() << std::endl;
-
         std::fill(result.begin(), result.end(), NEGATIVE_INFINITY);
-        // by definition
         assert(result.size() >= this->alphabet_sizes[character]);
 
         bool all_negative_infinity = std::all_of(
@@ -129,37 +112,13 @@ void laml_model::compute_taxa_log_inside_likelihood(
         if (all_negative_infinity) { // observed data is missing state
             result[0] = 0.0; // silenced latent state generating observed missing has probability 1.0
             for (size_t i = 1; i < this->alphabet_sizes[character]; ++i) { // the first character is missing state
-                //spdlog::info("[laml_model] compute_taxa_log_inside_likelihood observation-matrix (all missing state) character={}, taxa_id={}, i={}, probs={}", character, taxa_id, i, probs[i]);
                 result[i] = d.log_phi; // unedited and edited latent states generating 
             }
          } else { // observed data is not missing
              for (size_t i = 0; i < probs.size(); ++i) { // the first character is unedited
-                spdlog::debug("[laml_model] compute_taxa_log_inside_likelihood observation-matrix character={}, taxa_id={}, state={}, probs={}", character, taxa_id, i, probs[i]);
                 result[i+1] = probs[i] + d.log_one_minus_phi; // assumes precomputed
             }
         }
-
-        /*
-        cout << "[laml_model] compute_taxa_log_inside_likelihood observation-matrix.  character = " << character
-                  << ", taxa_id = " << taxa_id
-                  << ", result = [";
-        for (size_t i = 0; i < result.size(); ++i) {
-            std::cout << std::fixed << std::setprecision(4) << result[i];
-            if (i + 1 < result.size()) std::cout << ", ";
-        }
-        std::cout << "]" << std::endl;
-        */
-
-        /*std::ostringstream oss;
-        oss << "[laml_model] compute_taxa_log_inside_likelihood observation-matrix. "
-            << "character = " << character << ", taxa_id = " << taxa_id << ", result = [";
-        for (size_t i = 0; i < result.size(); ++i) {
-            oss << std::fixed << std::setprecision(4) << result[i];
-            if (i + 1 < result.size()) oss << ", ";
-        }
-        oss << "]";
-        spdlog::debug("{}", oss.str());*/
-
     }
 };
 
