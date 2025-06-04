@@ -16,7 +16,7 @@ opt <- parse_args(OptionParser(option_list = list(
               help = "CSV file with character matrix (required)"),
   make_option(c("-n", "--nrep"),   type = "integer",  default = 10,
               help = "number of random‑addition replicates  [default %default]"),
-  make_option(c("-o", "--output"), type = "character", default = "ras.trees",
+  make_option(c("-o", "--output"), type = "character", default = "initial",
               help = "output Newick file                    [default %default]"),
   make_option(c("-s", "--seed"),   type = "integer",  default = 42,
               help = "RNG seed                                [default %default]")
@@ -46,9 +46,18 @@ ras <- replicate(opt$nrep, random.addition(dat) |> make_binary_and_root(), simpl
 # construct single nj tree
 dm      <- dist.hamming(dat, exclude = "pairwise")
 nj_tree <- NJ(dm) |> make_binary_and_root()
-ras     <- c(ras, list(nj_tree))
 
-# write trees to newick file
-class(ras) <- "multiPhylo"
-write.tree(ras, file = opt$output)
-cat(sprintf("Wrote %d random addition and neighbor joining trees to %s\n", length(ras), opt$output))
+# write random addition trees
+tree_count <- 0
+for (i in 1:opt$nrep) {
+  tree_count <- tree_count + 1
+  output_file <- sprintf("%s_stepwise_addition_%02d.nwk", opt$output, i)
+  write.tree(ras[[i]], file = output_file)
+}
+
+# write NJ tree separately
+output_file <- sprintf("%s_neighbor_joining.nwk", opt$output)
+write.tree(nj_tree, file = output_file)
+
+cat(sprintf("Wrote %d random addition trees and 1 neighbor joining tree to %s_*\n", 
+            opt$nrep, opt$output))
