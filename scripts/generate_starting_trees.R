@@ -51,13 +51,13 @@ nj_tree <- NJ(dm) |> make_binary_and_root()
 tree_count <- 0
 for (i in 1:opt$nrep) {
   tree_count <- tree_count + 1
-  output_file <- sprintf("%s_stepwise_addition_%02d.nwk", opt$output, i)
+  output_file <- sprintf("%s.stepwise_addition_%02d.nwk", opt$output, i)
   write.tree(ras[[i]], file = output_file)
 }
 
 # write NJ tree separately
-output_file <- sprintf("%s_neighbor_joining.nwk", opt$output)
+output_file <- sprintf("%s.neighbor_joining.nwk", opt$output)
 write.tree(nj_tree, file = output_file)
 
-cat(sprintf("Wrote %d random addition trees and 1 neighbor joining tree to %s_*\n", 
+cat(sprintf("Wrote %d random addition trees and 1 neighbor joining tree to %s.*\n", 
             opt$nrep, opt$output))

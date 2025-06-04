@@ -285,11 +285,11 @@ em_results laml_expectation_maximization(
     likelihood_buffer outside_ll(num_characters, max_alphabet_size, t.num_nodes);
 
     for (size_t i = 0; i < t.num_nodes; i++) {
-        if (std::abs(t.branch_lengths[i] - BRANCH_LENGTH_LB) < 1e-9) {
+        if (t.branch_lengths[i] < BRANCH_LENGTH_LB + 1e-9) {
             t.branch_lengths[i] = BRANCH_LENGTH_LB + 1e-9;
         }
 
-        if (std::abs(t.branch_lengths[i] - BRANCH_LENGTH_UB) < 1e-9) {
+        if (t.branch_lengths[i] > BRANCH_LENGTH_UB - 1e-9) {
             t.branch_lengths[i] = BRANCH_LENGTH_UB - 1e-9;
         }
     }
