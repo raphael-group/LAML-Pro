@@ -1,20 +1,29 @@
-params.root_dir       = '/Users/schmidt73/Desktop/fastLAML/'
-params.sim_dir        = "${params.root_dir}/examples/"
+params.root_dir       = '/n/fs/ragr-research/projects/fast-laml/'
+params.sim_dir        = "/n/fs/ragr-research/projects/laml-pro/sim_data/set_3/input/"
 params.fast_laml      = "${params.root_dir}/build/src/fastlaml"
 params.outdir         = "${params.root_dir}/nextflow_results"
 
 params.generation_script = "${params.root_dir}/scripts/generate_starting_trees.R"
-params.R_bin = 'Rscript'
+params.R_bin = '/n/fs/ragr-data/users/schmidt/miniconda3/envs/breaked/bin/Rscript'
 
 params.instances = [
-    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.01, dropout_rate: 0.1]
+    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
+    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
+    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.3, dropout_rate: 0.1],
+    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
+    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
+    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.3, dropout_rate: 0.1],
+    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
+    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
+    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.3, dropout_rate: 0.1]
 ]
 
 process generate_starting_trees {
     memory '2 GB'
     time '59m'
-    stageInMode 'copy'
+    cpus 1
 
+    stageInMode 'copy'
     publishDir "${params.outdir}/starting_trees/${id}", mode: 'copy'
 
     input:
@@ -24,16 +33,16 @@ process generate_starting_trees {
         tuple val(args), path("initial.*.nwk")
 
     """
-    ${params.R_bin} ${params.generation_script} --input ${character_matrix} --nrep 3 --output initial --seed 0
+    ${params.R_bin} ${params.generation_script} --input ${character_matrix} --nrep 9 --output initial --seed 0
     """
 }
 
 process fast_laml {
     memory '2 GB'
-    time '59m'
+    time '4h'
     cpus 1
-    stageInMode 'copy'
 
+    stageInMode 'copy'
     publishDir "${params.outdir}/fast-laml/${id}/${starting_tree_id}/", mode: 'copy'
 
     input:
@@ -47,9 +56,9 @@ process fast_laml {
             path("timing.txt")
 
     """
-    gtime -v ${params.fast_laml} --matrix ${matrix} --tree ${tree} \
+    /usr/bin/time -v ${params.fast_laml} --matrix ${matrix} --tree ${tree} \
                         --output fastlaml --mode search --seed 0 \
-                        --temp 0.000001 --max-iterations 1000 -d ${matrix_format} &> timing.txt
+                        --temp 0.000001 --max-iterations 5000 -d ${matrix_format} &> timing.txt
     mv fastlaml_ultrametric_tree.newick fastlaml_ultrametric_tree.nwk
     mv fastlaml_tree.newick fastlaml_tree.nwk 
     """
@@ -74,7 +83,7 @@ workflow {
 
     // takes the "cross product" of the simulations and the starting trees
     initialized_simulations = simulations | map { args ->
-        [args, args[1], args[3]]
+        [args, args[0], args[3]]
     } | generate_starting_trees | flatMap { args, trees ->
         res = []
         for (tree in trees) {
@@ -85,11 +94,22 @@ workflow {
         res
     }
 
-    // runs fast-laml simulations for the argmax character matrix
-    initialized_simulations | map { 
-        id, true_tree, character_matrix, argmax_character_matrix, observation_matrix, starting_tree ->
-        matrix = argmax_character_matrix
-        matrix_format = 'character-matrix'
-        [id, starting_tree.getName(), matrix, matrix_format, starting_tree]
+    // runs fast-laml simulations in three different settings
+    settings = channel.fromList(['observation-matrix', 'character-matrix', 'argmax-character-matrix'])
+    initialized_simulations | combine(settings) | map {
+        id, true_tree, character_matrix, argmax_character_matrix, observation_matrix, starting_tree, setting ->
+
+        if (setting == 'observation-matrix') {
+            matrix = observation_matrix
+            matrix_format = 'observation-matrix'
+        } else if (setting == 'character-matrix') {
+            matrix = character_matrix
+            matrix_format = 'character-matrix'
+        } else {
+            matrix = argmax_character_matrix
+            matrix_format = 'character-matrix'
+        }
+
+        ["${id}.${setting}", starting_tree.getName(), matrix, matrix_format, starting_tree]
     } | fast_laml
 }
