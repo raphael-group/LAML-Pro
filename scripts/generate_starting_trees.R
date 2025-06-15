@@ -4,6 +4,9 @@
 #  random_addition.R : generate starting trees using neighbor 
 #  joining and random stepwise addition with parsimony.
 # ------------------------------------------------------------
+#install.packages("optparse", repos = "https://cloud.r-project.org")
+#install.packages("phangorn", repos = "https://cloud.r-project.org")
+#install.packages("ape", repos = "https://cloud.r-project.org")
 
 suppressPackageStartupMessages({
   library(optparse)
