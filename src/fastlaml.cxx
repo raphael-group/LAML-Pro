@@ -170,7 +170,7 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
         }
     }
 
-    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, true);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     auto end = std::chrono::high_resolution_clock::now();
@@ -197,180 +197,6 @@ struct hill_climbing_result {
     std::vector<double> log_likelihoods;
 };
 
-hill_climbing_result greedy_hill_climbing(
-    const tree& initial_tree, 
-    const phylogeny_data& data, 
-    double initial_phi,  // fixed typo
-    double initial_nu, 
-    unsigned int max_iterations,
-    unsigned int num_threads,
-    double tolerance = 0.1,
-    double temp = 0.1
-) {
-    tree best_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
-    auto initial_result = laml_expectation_maximization(best_tree, model, 100, true);
-    double best_log_likelihood = initial_result.log_likelihood;
-    
-    spdlog::info("Starting hill climbing with initial log likelihood: {}", best_log_likelihood);
-    
-    bool improved = true;
-    size_t iteration = 0;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    std::function<double(tree& t, laml_model& model)> scoring_function = [&](tree& t, laml_model& model) {
-        auto blens = t.branch_lengths;
-        auto params = model.parameters;
-
-        double score = laml_expectation_maximization(t, model, 100, false).log_likelihood;
-        t.branch_lengths = blens;
-        model.parameters = params;
-        return score;
-    };
-
-    std::vector<double> log_likelihoods;
-    log_likelihoods.push_back(best_log_likelihood);
-    while (iteration < max_iterations && improved) {
-        iteration++;
-        improved = false;
-        
-        // Evaluate entire NNI neighborhood
-        std::vector<std::pair<nni, double>> neighborhood = evaluate_nni_neighborhood(
-            scoring_function, best_tree, model, num_threads
-        );
-        
-        std::vector<std::pair<nni, double>> filtered_neighborhood;
-        std::vector<double> weights;
-        for (const auto& [move, log_likelihood] : neighborhood) {
-            if (log_likelihood > best_log_likelihood - tolerance) {
-                filtered_neighborhood.push_back({move, log_likelihood});
-                double weight = std::exp((log_likelihood - best_log_likelihood) / temp);
-                weights.push_back(weight);
-            }
-        }
-
-        if (filtered_neighborhood.empty()) {
-            spdlog::info("No valid NNI moves found, stopping hill climbing");
-            break;
-        }
-
-        std::discrete_distribution<> dist(weights.begin(), weights.end());
-        auto selected_move_index = dist(gen);
-        auto selected_move = filtered_neighborhood[selected_move_index].first;
-       
-        int parent_u = best_tree.tree.predecessors(selected_move.u)[0];
-        int parent_v = best_tree.tree.predecessors(selected_move.v)[0];
-        
-        best_tree.tree.remove_edge(parent_u, selected_move.u);
-        best_tree.tree.remove_edge(parent_v, selected_move.v);
-        best_tree.tree.add_edge(parent_u, selected_move.v);
-        best_tree.tree.add_edge(parent_v, selected_move.u);
-    
-        auto result = laml_expectation_maximization(best_tree, model, 100, false);
-        
-        double improvement = result.log_likelihood - best_log_likelihood;
-        best_log_likelihood = result.log_likelihood;
-        log_likelihoods.push_back(best_log_likelihood);
-
-        spdlog::info("Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, improvement: {}, current phi: {}, current nu: {}",
-            iteration, selected_move.u, selected_move.v, best_log_likelihood, improvement, model.parameters[0], model.parameters[1]); 
-        
-        improved = true;
-    }
-    
-    spdlog::info("Hill climbing completed after {} iterations. Final log likelihood: {}", 
-             iteration, best_log_likelihood);
-    
-    return {best_tree, best_log_likelihood, iteration, log_likelihoods};
-}
-
-hill_climbing_result fixed_temp_simulated_annealing (
-    const tree& initial_tree, 
-    const phylogeny_data& data, 
-    double inital_phi, 
-    double initial_nu, 
-    unsigned int max_iterations,
-    unsigned int num_threads,
-    double temp = 0.00001
-) {
-    tree current_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type);
-    auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
-    double current_log_likelihood = initial_result.log_likelihood;
-    
-    spdlog::info("Starting simulated annealing with initial log likelihood: {}", current_log_likelihood);
-    
-    size_t iteration = 0;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    std::vector<double> log_likelihoods;
-    log_likelihoods.push_back(current_log_likelihood);
-
-    // assigns a uniform weight to each nni
-    int nni_neighborhood_size = compute_nni_neighborhood(current_tree).size();
-    std::vector<double> nni_weights(nni_neighborhood_size, 1.0);
-    std::discrete_distribution<> nni_sampler(nni_weights.begin(), nni_weights.end());
-
-    std::uniform_real_distribution<> annealing_sampler(0, 1);
-    while (iteration < max_iterations) {        
-        std::vector<nni> neighborhood = compute_nni_neighborhood(current_tree);
-        nni sampled_move = neighborhood[nni_sampler(gen)];
-
-        auto [u, v]  = sampled_move;
-        int parent_u = current_tree.tree.predecessors(u)[0];
-        int parent_v = current_tree.tree.predecessors(v)[0];
-
-        // apply move
-        current_tree.tree.remove_edge(parent_u, u);
-        current_tree.tree.remove_edge(parent_v, v);
-        current_tree.tree.add_edge(parent_u, v);
-        current_tree.tree.add_edge(parent_v, u);
-
-        // score current topology
-        auto blens = current_tree.branch_lengths;
-        auto params = model.parameters;
-
-        double move_log_likelihood = laml_expectation_maximization(current_tree, model, 100, false).log_likelihood;
-        double proposal = std::exp(((move_log_likelihood  - current_log_likelihood) / (temp * std::abs(current_log_likelihood))));
-    
-        if (proposal > annealing_sampler(gen)) { // probabilistic accept
-            current_log_likelihood = move_log_likelihood;
-
-            spdlog::info(
-                "Iteration {}: Applied NNI move ({}, {}), new log likelihood: {}, current phi: {}, current nu: {}",
-                iteration, sampled_move.u, sampled_move.v, current_log_likelihood, model.parameters[0], model.parameters[1]
-            ); 
-        } else {
-            spdlog::info(
-                "Iteration {}: Rejected NNI move ({}, {}), proposed log likelihood: {}", 
-                iteration, sampled_move.u, sampled_move.v, current_log_likelihood
-            );
-
-            // revert move 
-            current_tree.tree.remove_edge(parent_u, v);
-            current_tree.tree.remove_edge(parent_v, u);
-            current_tree.tree.add_edge(parent_u, u);
-            current_tree.tree.add_edge(parent_v, v);
-
-            // revert parameter changes
-            current_tree.branch_lengths = blens;
-            model.parameters = params;
-        }        
-
-        log_likelihoods.push_back(current_log_likelihood);
-        iteration++;
-    }
-    
-    spdlog::info("Fixed temperature simulated annealing completed after {} iterations. Final log likelihood: {}", 
-             iteration, current_log_likelihood);
-    
-    return {current_tree, current_log_likelihood, iteration, log_likelihoods};
-}
-
 hill_climbing_result simulated_annealing(
     const tree& initial_tree, 
     const phylogeny_data& data, 
@@ -379,9 +205,7 @@ hill_climbing_result simulated_annealing(
     unsigned int max_iterations,
     unsigned int num_threads,
     double temp = 0.00001 
-) {
-    // Cool the temperature with smooth decay. TODO: take out the temp parameer
-    
+) {    
     // Initialize simulated annealing parameters, inheriting from LAML
     const double epsilon = 1e-12;
     const double alpha = 0.99; //1.0;
@@ -392,7 +216,7 @@ hill_climbing_result simulated_annealing(
     const double T0 = 1.0; // starting temperature
 
     tree current_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, false);
     auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
     double current_log_likelihood = initial_result.log_likelihood;
     
@@ -441,15 +265,10 @@ hill_climbing_result simulated_annealing(
         double T = T0 * std::pow(alpha, no_accepts);  // alpha ~ 0.95, T0 ~ 1.0
         double proposal = std::exp(delta / T);
 
-        // #double T = std::max(epsilon, (std::pow(alpha, iteration) - std::pow(alpha, c)) / (1.0 - std::pow(alpha, c)));
-        //double proposal = std::min(1.0, std::exp(delta - epsilon) / T);
-        // double proposal = std::exp(((move_log_likelihood  - current_log_likelihood) / (temp * std::abs(current_log_likelihood))));
-
         if (delta > 0 || proposal > annealing_sampler(gen)) {
             current_log_likelihood = move_log_likelihood;
             move_accepted = true;
 
-            // if (proposal > annealing_sampler(gen)) { // probabilistic accept
             spdlog::info(
                 "Iteration {}: Applied NNI move ({}, {}), no. accepts: {}, new log likelihood: {}, current phi: {}, current nu: {}",
                 iteration, sampled_move.u, sampled_move.v, no_accepts, current_log_likelihood, model.parameters[0], model.parameters[1]
@@ -523,7 +342,7 @@ void search_optimal_tree(
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model = laml_model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, false);
     auto em_res = laml_expectation_maximization(t, model, 100, false);
     
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);

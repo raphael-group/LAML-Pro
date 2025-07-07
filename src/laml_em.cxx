@@ -351,30 +351,26 @@ em_results laml_expectation_maximization(
         }
     }
 
-    bool enforce_ultrametric = true;
+    bool enforce_ultrametric = model.ultrametric;
 
     // set up the M-step solver
     nlopt::opt local_opt(nlopt::LD_CCSAQ, t.num_nodes + 3);
-    //local_opt.set_xtol_rel(1e-8);
-    local_opt.set_ftol_rel(1e-8);
-
-    nlopt::opt opt(nlopt::LD_AUGLAG_EQ, t.num_nodes + 3);
-    opt.set_param("verbosity", true);
+    nlopt::opt opt(nlopt::LD_AUGLAG, t.num_nodes + 3);
 
     auto paths = root_to_leaf_paths(t);
     if (enforce_ultrametric) {
-        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-6);
+        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-5);
     }
     
     std::vector<double> params(t.num_nodes + 3);
     std::vector<double> lb(t.num_nodes + 3, BRANCH_LENGTH_LB);
     std::vector<double> ub(t.num_nodes + 3, BRANCH_LENGTH_UB);
     ub[1] = 1.0 - 1e-5; // phi in [0, 1]
-    
+
+    local_opt.set_xtol_rel(1e-6);
     opt.set_lower_bounds(lb);
     opt.set_upper_bounds(ub);
-    //opt.set_xtol_rel(1e-8);
-    opt.set_ftol_rel(1e-8);
+    opt.set_xtol_rel(1e-6);
     opt.set_local_optimizer(local_opt);
 
     // initialize model parameters
@@ -387,21 +383,13 @@ em_results laml_expectation_maximization(
     for (size_t i = 0; i < t.num_nodes; ++i) {
         params[i + 2] = t.branch_lengths[i];
     }
-    params[t.num_nodes + 2] = 10.0;
+
+    params[t.num_nodes + 2] = model.parameters[2];
 
     double llh = 0.0;
     double EM_STOPPING_CRITERION = 1e-5;
     int i = 0;
     for (; i < max_em_iterations; i++) {
-        for (auto path : paths) {
-            double blen_sum = 0.0;
-            for (auto node : path) {
-                double blen = params[node + 2];
-                blen_sum += blen;
-            } 
-            //std::cout << 0.5 * (blen_sum - params[params.size() - 1]) * (blen_sum - params[params.size() - 1]) << std::endl;
-        }
-
         auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
 
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
@@ -421,34 +409,21 @@ em_results laml_expectation_maximization(
             spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
         }
 
+        std::vector<double> saved_params = params;
         double fx;
         try {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
-
-            auto test_g = std::vector<double>();
-            std::cout << m_step_objective_and_grad(params, test_g, &params_data) << std::endl;
-
             opt.set_min_objective(m_step_objective_and_grad, &params_data); 
             auto res = opt.optimize(params, fx);
-            std::cout << res << std::endl;
-            std::cout << m_step_objective_and_grad(params, test_g, &params_data) << std::endl;
         } catch (const std::runtime_error &e) {
             throw e;
         }
 
         model.parameters[0] = params[0];
         model.parameters[1] = params[1];
+        model.parameters[2] = params[t.num_nodes + 2];
         for (size_t i = 0; i < t.num_nodes; ++i) {
             t.branch_lengths[i] = params[i + 2];
-        }
-
-        for (auto path : paths) {
-            double blen_sum = 0.0;
-            for (auto node : path) {
-                double blen = params[node + 2];
-                blen_sum += blen;
-            } 
-            //std::cout << blen_sum << std::endl;
         }
 
         model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
@@ -461,18 +436,23 @@ em_results laml_expectation_maximization(
         
         const double tolerance = 1e-8;
         if (llh_after < llh_before - tolerance) {
-            spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
-            throw std::runtime_error("LLH decreased significantly in M-step.");
+            if (!enforce_ultrametric) {
+                spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
+                throw std::runtime_error("LLH decreased significantly in M-step.");
+            } else if (i != 0) {
+                model.parameters[0] = saved_params[0];
+                model.parameters[1] = saved_params[1];
+                model.parameters[2] = saved_params[t.num_nodes + 2];
+                for (size_t i = 0; i < t.num_nodes; ++i) {
+                    t.branch_lengths[i] = saved_params[i + 2];
+                }
+            }
         }
-        
-        if (llh_after < llh_before) { 
-            spdlog::info("{}: {}", llh_before, llh_after);
-            throw std::runtime_error("LLH decreased in M-step.");
-        }
+
 
         llh = llh_after;
 
-        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
+        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION && (!enforce_ultrametric || i != 0)) {
             break;
         }
     }
