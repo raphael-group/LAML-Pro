@@ -26,6 +26,61 @@ struct e_step_data {
     int num_not_missing;
 };
 
+std::vector<std::vector<int>> root_to_leaf_paths(const tree& t) {
+    std::vector<std::vector<int>> paths;
+
+    for (int node_id : t.tree.nodes()) { 
+        if (t.tree.out_degree(node_id) != 0) {
+            continue;
+        }
+
+        std::vector<int> path;
+        int current_id = node_id;
+        while (true) {
+            int current_node = t.tree[current_id].data; 
+            path.push_back(current_node);
+
+            if (current_id == (int) t.root_id) { // may be small off by one error with root
+                break;
+            }
+
+            current_id = t.tree.predecessors(current_id)[0];
+        } 
+
+        paths.push_back(path);
+    }
+
+    return paths;
+}
+
+double m_step_ultrametric_constraint(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
+{
+    std::vector<std::vector<int>>* paths = static_cast<std::vector<std::vector<int>>*>(data);
+
+    for (size_t i = 0; i < gradient.size(); i++) {
+        if (!gradient.empty()) gradient[i] = 0.0;
+    }
+
+    double obj = 0.0;
+    for (auto path : *paths) {
+        double blen_sum = 0.0;
+        for (auto node : path) {
+            double blen = parameters[node + 2];
+            blen_sum += blen;
+        } 
+
+        for(auto node : path) {
+            if (!gradient.empty()) gradient[node + 2] += blen_sum - parameters[parameters.size() - 1];
+        }
+
+        if (!gradient.empty()) gradient[parameters.size() - 1] = parameters[parameters.size() - 1] - blen_sum;
+
+        obj += 0.5 * (blen_sum - parameters[parameters.size() - 1]) * (blen_sum - parameters[parameters.size() - 1]);
+    }
+
+    return obj;
+}
+
 double m_step_objective_and_grad(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
 {
     e_step_data* m_data = static_cast<e_step_data*>(data);
@@ -42,8 +97,10 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
     double dnu = 0.0;
     double dphi = 0.0;
 
-    for (size_t i = 0; i < gradient.size(); i++) {
-        gradient[i] = 0.0;
+    if (!gradient.empty()) {
+        for (size_t i = 0; i < gradient.size(); i++) {
+            gradient[i] = 0.0;
+        }
     }
     
     for (size_t i = 0; i < responsibilities.size(); ++i) {
@@ -56,7 +113,7 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
         {
             result += -responsibilities[i][0] * blen * (1.0 + nu);
             dnu    += -responsibilities[i][0] * blen;
-            gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
+            if (!gradient.empty()) gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
         }
 
         {
@@ -64,7 +121,7 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
             result += responsibilities[i][1] * (log_part - blen * nu);
             dnu -= responsibilities[i][1] * blen;
             double d_log_part = exp_blen / (1.0 - exp_blen);
-            gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
+            if (!gradient.empty()) gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
         }
 
         {
@@ -73,16 +130,16 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
             double d_nu = (blen * exp_blen_nu) / val;
             dnu += (responsibilities[i][2] + responsibilities[i][4]) * d_nu;
             double d_blen = (nu * exp_blen_nu) / val;
-            gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
+            if (!gradient.empty()) gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
         }
 
         {
             result += -responsibilities[i][3] * blen * nu;
             dnu -= responsibilities[i][3] * blen;
-            gradient[i + 2] += -responsibilities[i][3] * nu;
+            if (!gradient.empty()) gradient[i + 2] += -responsibilities[i][3] * nu;
         }
 
-        gradient[i + 2] *= blen;
+       if (!gradient.empty()) gradient[i + 2] *= blen;
     }
 
     {
@@ -94,10 +151,10 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
         dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
     }
 
-    gradient[0] = -dnu;
-    gradient[1] = -dphi;
+    if (!gradient.empty()) gradient[0] = -dnu;
+    if (!gradient.empty()) gradient[1] = -dphi;
     for (size_t i = 0; i < responsibilities.size(); ++i) {
-        gradient[i + 2] = -gradient[i + 2];
+        if (!gradient.empty()) gradient[i + 2] = -gradient[i + 2];
     }
 
     return -result;
@@ -294,17 +351,31 @@ em_results laml_expectation_maximization(
         }
     }
 
+    bool enforce_ultrametric = true;
+
     // set up the M-step solver
-    nlopt::opt opt(nlopt::LD_CCSAQ, t.num_nodes + 2);
+    nlopt::opt local_opt(nlopt::LD_CCSAQ, t.num_nodes + 3);
+    //local_opt.set_xtol_rel(1e-8);
+    local_opt.set_ftol_rel(1e-8);
+
+    nlopt::opt opt(nlopt::LD_AUGLAG_EQ, t.num_nodes + 3);
+    opt.set_param("verbosity", true);
+
+    auto paths = root_to_leaf_paths(t);
+    if (enforce_ultrametric) {
+        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-6);
+    }
     
-    std::vector<double> params(t.num_nodes + 2);
-    std::vector<double> lb(t.num_nodes + 2, BRANCH_LENGTH_LB);
-    std::vector<double> ub(t.num_nodes + 2, BRANCH_LENGTH_UB);
+    std::vector<double> params(t.num_nodes + 3);
+    std::vector<double> lb(t.num_nodes + 3, BRANCH_LENGTH_LB);
+    std::vector<double> ub(t.num_nodes + 3, BRANCH_LENGTH_UB);
     ub[1] = 1.0 - 1e-5; // phi in [0, 1]
     
     opt.set_lower_bounds(lb);
     opt.set_upper_bounds(ub);
-    opt.set_xtol_rel(1e-7);
+    //opt.set_xtol_rel(1e-8);
+    opt.set_ftol_rel(1e-8);
+    opt.set_local_optimizer(local_opt);
 
     // initialize model parameters
     std::vector<double> internal_comp_buffer(max_alphabet_size);
@@ -316,11 +387,21 @@ em_results laml_expectation_maximization(
     for (size_t i = 0; i < t.num_nodes; ++i) {
         params[i + 2] = t.branch_lengths[i];
     }
-    
+    params[t.num_nodes + 2] = 10.0;
+
     double llh = 0.0;
     double EM_STOPPING_CRITERION = 1e-5;
     int i = 0;
     for (; i < max_em_iterations; i++) {
+        for (auto path : paths) {
+            double blen_sum = 0.0;
+            for (auto node : path) {
+                double blen = params[node + 2];
+                blen_sum += blen;
+            } 
+            //std::cout << 0.5 * (blen_sum - params[params.size() - 1]) * (blen_sum - params[params.size() - 1]) << std::endl;
+        }
+
         auto likelihood = phylogeny::compute_inside_log_likelihood(model, t, inside_ll, model_data);
 
         phylogeny::compute_edge_inside_log_likelihood(model, t, inside_ll, edge_inside_ll, model_data);
@@ -343,8 +424,14 @@ em_results laml_expectation_maximization(
         double fx;
         try {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
+
+            auto test_g = std::vector<double>();
+            std::cout << m_step_objective_and_grad(params, test_g, &params_data) << std::endl;
+
             opt.set_min_objective(m_step_objective_and_grad, &params_data); 
-            opt.optimize(params, fx);
+            auto res = opt.optimize(params, fx);
+            std::cout << res << std::endl;
+            std::cout << m_step_objective_and_grad(params, test_g, &params_data) << std::endl;
         } catch (const std::runtime_error &e) {
             throw e;
         }
@@ -353,6 +440,15 @@ em_results laml_expectation_maximization(
         model.parameters[1] = params[1];
         for (size_t i = 0; i < t.num_nodes; ++i) {
             t.branch_lengths[i] = params[i + 2];
+        }
+
+        for (auto path : paths) {
+            double blen_sum = 0.0;
+            for (auto node : path) {
+                double blen = params[node + 2];
+                blen_sum += blen;
+            } 
+            //std::cout << blen_sum << std::endl;
         }
 
         model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
@@ -365,12 +461,14 @@ em_results laml_expectation_maximization(
         
         const double tolerance = 1e-8;
         if (llh_after < llh_before - tolerance) {
+            spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
             throw std::runtime_error("LLH decreased significantly in M-step.");
         }
-        /*if (llh_after < llh_before) { 
+        
+        if (llh_after < llh_before) { 
             spdlog::info("{}: {}", llh_before, llh_after);
             throw std::runtime_error("LLH decreased in M-step.");
-        }*/
+        }
 
         llh = llh_after;
 
