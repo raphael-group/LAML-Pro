@@ -1,5 +1,9 @@
 add_executable(fastlaml fastlaml.cxx io.cxx models/laml.cxx laml_em.cxx ultrametric.cxx)
 
+# find ipopt
+find_package(PkgConfig)
+pkg_check_modules(IPOPT REQUIRED IMPORTED_TARGET ipopt>=3)
+
 # add libraries
 target_link_libraries(fastlaml PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(fastlaml PRIVATE spdlog)
@@ -9,6 +13,7 @@ target_link_libraries(fastlaml PRIVATE nanobench)
 target_link_libraries(fastlaml PRIVATE gcem)
 target_link_libraries(fastlaml PRIVATE osqp)
 target_link_libraries(fastlaml PRIVATE nlopt)
+target_link_libraries(fastlaml PRIVATE PkgConfig::IPOPT)
 
 # Get the current commit hash
 execute_process(

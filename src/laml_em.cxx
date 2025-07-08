@@ -14,9 +14,11 @@
 #include "laml_em.h"
 
 #include <nlopt.hpp>
+#include "IpTNLP.hpp"
+#include "IpIpoptApplication.hpp"
 
-#define BRANCH_LENGTH_LB (1e-5)
-#define BRANCH_LENGTH_UB (1e5)
+#define BRANCH_LENGTH_LB (1e-9)
+#define BRANCH_LENGTH_UB (1e9)
 #define NEGATIVE_INFINITY (-1e7)
 
 struct e_step_data {
@@ -78,7 +80,11 @@ double m_step_ultrametric_constraint(const std::vector<double>& parameters, std:
         obj += 0.5 * (blen_sum - parameters[parameters.size() - 1]) * (blen_sum - parameters[parameters.size() - 1]);
     }
 
-    return obj;
+    for (size_t i = 0; i < gradient.size(); i++) {
+        if (!gradient.empty()) gradient[i] *= 1.0;
+    }
+
+    return obj * 1.0;
 }
 
 double m_step_objective_and_grad(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
@@ -138,8 +144,6 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
             dnu -= responsibilities[i][3] * blen;
             if (!gradient.empty()) gradient[i + 2] += -responsibilities[i][3] * nu;
         }
-
-       if (!gradient.empty()) gradient[i + 2] *= blen;
     }
 
     {
@@ -159,6 +163,243 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
 
     return -result;
 }
+
+static inline double hess_nu_blen(const std::array<double,6>& resp,
+                                  double blen, double nu)
+{
+    const double a    = std::exp(-nu * blen);       // e^{-νb}
+    const double val  = 1.0 - a;                    // 1-a
+    const double inv  = 1.0 / val;
+    const double inv2 = inv * inv;
+
+    const double c = resp[2] + resp[4];
+
+    double H = (resp[0] + resp[1] + resp[3]);       // linear terms
+    H += c * ( a * (1.0 - blen*nu) * inv           //   a(1-νb)/(1-a)
+             + blen * nu * a * a * inv2 );         // + νb a²/(1-a)²
+    return H;
+}
+
+using namespace Ipopt;
+
+class MStepProblem : public TNLP {
+    private:
+    e_step_data data;
+    tree t;
+    std::vector<double> init;
+
+    public:
+    MStepProblem(e_step_data data, tree t, std::vector<double> init) : data(data), t(t), init(init)
+    { }
+
+    bool get_nlp_info(
+        Index& n,
+        Index& m,
+        Index& nnz_jac_g,
+        Index& nnz_h_lag,
+        IndexStyleEnum& index_style
+    )
+    {
+        n = t.num_nodes + 3;
+        m = 0;
+        nnz_jac_g = 0;
+        nnz_h_lag = 2 * t.num_nodes + 2;
+        index_style = TNLP::C_STYLE;
+        return true;
+    }
+
+    bool get_bounds_info(
+        Index n,
+        Number* x_l,
+        Number* x_u,
+        Index m,
+        Number* g_l,
+        Number* g_u
+    )
+    {
+        for (int i=0; i < n; i++) {
+            x_l[i] = BRANCH_LENGTH_LB;
+            x_u[i] = BRANCH_LENGTH_UB;
+        }
+
+        x_u[1] = 1.0 - 1e-5; // set phi \in [0, 1]
+        return true;
+    }
+
+    bool get_starting_point(
+        Index n,
+        bool init_x,
+        Number* x,
+        bool init_z,
+        Number* z_L,
+        Number* z_U,
+        Index m,
+        bool init_lambda,
+        Number* lambda
+    )
+    {
+        std::copy(init.begin(), init.end(), x);
+        return true;
+    }
+
+    bool eval_f(
+        Index n,
+        const Number* x,
+        bool new_x,
+        Number& obj_value
+    )
+    {
+        std::vector<double> params(n), empty_grad;
+        for (int i=0; i<n; i++) params[i] = x[i];
+        obj_value = m_step_objective_and_grad(params, empty_grad, &data);
+        return true;
+    }
+
+    bool eval_grad_f(
+        Index n,
+        const Number* x,
+        bool new_x,
+        Number* grad_f
+    ) {
+        std::vector<double> params(n), grad(n);
+        for (int i=0; i<n; i++) params[i] = x[i];
+        m_step_objective_and_grad(params, grad, &data);
+        for (int i=0; i<n; i++) grad_f[i] = grad[i];
+        return true;
+    }
+
+    bool eval_h(
+        Index         n,
+        const Number* x,
+        bool          new_x,
+        Number        obj_factor,
+        Index         m,
+        const Number* lambda,
+        bool          new_lambda,
+        Index         nele_hess,
+        Index*        iRow,
+        Index*        jCol,
+        Number*       values
+    )
+    {
+        const int B = t.num_nodes;          // number of branch lengths
+
+        if (!values) {
+            Index k = 0;
+            iRow[k] = jCol[k] = 0; ++k;
+            iRow[k] = jCol[k] = 1; ++k;           // (φ,φ)
+            for (int i = 0; i < B; ++i) {                          // (bᵢ,bᵢ)
+                iRow[k] = jCol[k] = 2+i; ++k;
+            }
+            for (int i = 0; i < B; ++i) {                          // (bᵢ,ν)
+                iRow[k] = 2+i;    jCol[k] = 0; ++k;
+            }
+            assert(k == nele_hess);
+            return true;
+        }
+
+        /* --- 2. numerical values --------------------------------------- */
+        const double nu  = x[0];
+        const double phi = x[1];
+
+        /* pre-compute pieces that appear in many branches */
+        double h_nu_nu  = 0.0, h_phi_phi = 0.0;
+        std::vector<double> h_bb(B), h_nu_b(B);
+
+        /* ---- gather per-branch contributions ---- */
+        for (int i = 0; i < B; ++i) {
+            double blen = x[2+i];
+            const auto& r = data.responsibilities[i];
+
+            /* (ν,ν) term ------------------------------------------------- */
+            {   // contributions from all four blocks
+                double a   = std::exp(-blen * nu);
+                double val = 1.0 - a;
+                double inv = 1.0 / val;
+                h_nu_nu += r[0]*0.0
+                        + r[1]*0.0
+                        + r[3]*0.0
+                        + (r[2]+r[4]) * ( blen*blen * a * inv
+                                        - blen*blen * a*a * inv*inv );
+            }
+
+            /* (bᵢ,bᵢ) diagonal ------------------------------------------ */
+            {
+                double a    = std::exp(-blen * nu);
+                double val  = 1.0 - a;
+                double inv  = 1.0 / val;
+                double inv2 = inv * inv;
+                h_bb[i] = (r[0] + r[1] + r[3])
+                        + (r[2]+r[4]) * (  nu*nu * a * inv
+                                        - nu*nu * a*a * inv2 );
+            }
+
+            /* (bᵢ,ν) mixed ---------------------------------------------- */
+            h_nu_b[i] = hess_nu_blen(r, blen, nu);
+        }
+
+        /* φ-φ block (no coupling with others) ----------------------------- */
+        {
+            double inv1 = 1.0 / (1.0 - phi);
+            double inv2 = 1.0 / phi;
+            h_phi_phi = data.num_not_missing * inv1*inv1
+                    + (data.num_missing - data.leaf_responsibility) * inv2*inv2;
+        }
+
+        /* ---- 3. write triplet values (already in lower triangle) ------- */
+        Index k = 0;
+        values[k++] = obj_factor * h_nu_nu;                 // (ν,ν)
+        values[k++] = obj_factor * h_phi_phi;               // (φ,φ)
+
+        for (int i = 0; i < B; ++i)                         // (bᵢ,bᵢ)
+            values[k++] = obj_factor * h_bb[i];
+
+        for (int i = 0; i < B; ++i)                         // (bᵢ,ν)
+            values[k++] = obj_factor * h_nu_b[i];
+
+        assert(k == nele_hess);
+        return true;
+    }
+
+    bool eval_g(
+      Index         n,
+      const Number* x,
+      bool          new_x,
+      Index         m,
+      Number*       g
+    ) {
+        return true;
+    }
+
+    bool eval_jac_g(
+      Index         n,
+      const Number* x,
+      bool          new_x,
+      Index         m,
+      Index         nele_jac,
+      Index*        iRow,
+      Index*        jCol,
+      Number*       values
+    ) {
+        return true;
+    }
+
+    void finalize_solution(
+        SolverReturn status,
+        Index n,
+        const Number* x,
+        const Number* z_L,
+        const Number* z_U,
+        Index m,
+        const Number* g,
+        const Number* lambda,
+        Number obj_value,
+        const IpoptData* ip_data,
+        IpoptCalculatedQuantities* ip_cq
+    ) {
+        return;
+    }
+};
 
 void laml_expectation_step(
     const tree& t,
@@ -355,11 +596,11 @@ em_results laml_expectation_maximization(
 
     // set up the M-step solver
     nlopt::opt local_opt(nlopt::LD_CCSAQ, t.num_nodes + 3);
-    nlopt::opt opt(nlopt::LD_AUGLAG, t.num_nodes + 3);
+    nlopt::opt opt(nlopt::LD_AUGLAG_EQ, t.num_nodes + 3);
 
     auto paths = root_to_leaf_paths(t);
     if (enforce_ultrametric) {
-        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-5);
+        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-3);
     }
     
     std::vector<double> params(t.num_nodes + 3);
@@ -373,6 +614,28 @@ em_results laml_expectation_maximization(
     opt.set_xtol_rel(1e-6);
     opt.set_local_optimizer(local_opt);
 
+    std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
+    app->Options()->SetNumericValue("tol", 1e-3);
+    app->Options()->SetNumericValue("derivative_test_perturbation", 1e-8);
+    app->Options()->SetNumericValue("derivative_test_tol", 1e-1);
+    app->Options()->SetStringValue("derivative_test","second-order"); // one-off check
+    // app->Options()->SetNumericValue("mu_init", 1e-2);
+    // app->Options()->SetIntegerValue("max_iter", 5000);
+    // app->Options()->SetStringValue("mu_strategy", "adaptive");
+    // app->Options()->SetStringValue("linear_solver", "lapack");
+    // app->Options()->SetStringValue("mu_oracle", "quality_function");
+    // app->Options()->SetStringValue("warm_start_init_point", "yes");
+    // app->Options()->SetStringValue ("hessian_approximation",  "limited-memory");
+    // app->Options()->SetIntegerValue("limited_memory_max_history", 4);
+    // app->Options()->SetIntegerValue("limited_memory_max_skipping", 5);
+    // app->Options()->SetIntegerValue("limited_memory_reset_frequency", 20);
+
+    ApplicationReturnStatus status;
+    status = app->Initialize();
+    if (status != Solve_Succeeded) {
+        throw std::runtime_error("*** Error during initialization!");
+    }
+
     // initialize model parameters
     std::vector<double> internal_comp_buffer(max_alphabet_size);
 
@@ -383,7 +646,6 @@ em_results laml_expectation_maximization(
     for (size_t i = 0; i < t.num_nodes; ++i) {
         params[i + 2] = t.branch_lengths[i];
     }
-
     params[t.num_nodes + 2] = model.parameters[2];
 
     double llh = 0.0;
@@ -413,8 +675,15 @@ em_results laml_expectation_maximization(
         double fx;
         try {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
+            //std::unique_ptr<TNLP> prob(new MStepProblem(params_data, t, params));
+            std::vector<double> fake_grad;
+            double obj_before = m_step_objective_and_grad(params, fake_grad, &params_data);
+            SmartPtr<TNLP> prob = new MStepProblem(params_data, t, params);
+            app->OptimizeTNLP(prob);
             opt.set_min_objective(m_step_objective_and_grad, &params_data); 
             auto res = opt.optimize(params, fx);
+            double obj_after = m_step_objective_and_grad(params, fake_grad, &params_data);
+            spdlog::info("Obj before {} and after {}", obj_before, obj_after);
         } catch (const std::runtime_error &e) {
             throw e;
         }
@@ -436,23 +705,14 @@ em_results laml_expectation_maximization(
         
         const double tolerance = 1e-8;
         if (llh_after < llh_before - tolerance) {
-            if (!enforce_ultrametric) {
-                spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
-                throw std::runtime_error("LLH decreased significantly in M-step.");
-            } else if (i != 0) {
-                model.parameters[0] = saved_params[0];
-                model.parameters[1] = saved_params[1];
-                model.parameters[2] = saved_params[t.num_nodes + 2];
-                for (size_t i = 0; i < t.num_nodes; ++i) {
-                    t.branch_lengths[i] = saved_params[i + 2];
-                }
-            }
+            spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
+            throw std::runtime_error("LLH decreased significantly in M-step.");
         }
 
 
         llh = llh_after;
 
-        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION && (!enforce_ultrametric || i != 0)) {
+        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
             break;
         }
     }

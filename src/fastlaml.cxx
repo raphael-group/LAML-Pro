@@ -170,7 +170,7 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
         }
     }
 
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, true);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, false);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     auto end = std::chrono::high_resolution_clock::now();
@@ -207,8 +207,7 @@ hill_climbing_result simulated_annealing(
     double temp = 0.00001 
 ) {    
     // Initialize simulated annealing parameters, inheriting from LAML
-    const double epsilon = 1e-12;
-    const double alpha = 0.99; //1.0;
+    const double alpha = 0.99;
     size_t no_accepts = 0;
     size_t no_improve_counter = 0;
     const size_t max_no_improve = 100; // number of small-improvement moves allowed
