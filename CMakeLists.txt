@@ -24,19 +24,6 @@ target_include_directories(fastlaml_tests PUBLIC "${fastlaml_SOURCE_DIR}/include
 # turn off JSON library tests
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 
-include(FetchContent)
-
-FetchContent_Declare(
-  nlopt
-  GIT_REPOSITORY https://github.com/stevengj/nlopt.git
-  GIT_TAG        v2.10.0  # Replace with your desired NLopt version tag
-)
-
-FetchContent_MakeAvailable(nlopt)
-
-target_include_directories(fastlaml PUBLIC ${nlopt_BINARY_DIR})
-target_include_directories(fastlaml_tests PUBLIC ${nlopt_BINARY_DIR})
-
 # compile libraries
 add_subdirectory(third-party/spdlog)
 add_subdirectory(third-party/csv-parser)

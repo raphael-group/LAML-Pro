@@ -22,6 +22,3 @@
 [submodule "third-party/Catch2"]
 	path = third-party/Catch2
 	url = git@github.com:catchorg/Catch2.git
-[submodule "third-party/nlopt"]
-	path = third-party/nlopt
-	url = git@github.com:stevengj/nlopt.git

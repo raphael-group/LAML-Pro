@@ -12,7 +12,6 @@ target_link_libraries(fastlaml PRIVATE argparse)
 target_link_libraries(fastlaml PRIVATE nanobench)
 target_link_libraries(fastlaml PRIVATE gcem)
 target_link_libraries(fastlaml PRIVATE osqp)
-target_link_libraries(fastlaml PRIVATE nlopt)
 target_link_libraries(fastlaml PRIVATE PkgConfig::IPOPT)
 
 # Get the current commit hash

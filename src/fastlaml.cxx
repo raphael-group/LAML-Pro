@@ -212,7 +212,7 @@ hill_climbing_result simulated_annealing(
     size_t no_improve_counter = 0;
     const size_t max_no_improve = 100; // number of small-improvement moves allowed
     const double eta = 1e-8; // minimum improvement
-    const double T0 = 1.0; // starting temperature
+    const double T0 = temp; // starting temperature
 
     tree current_tree = initial_tree;
     laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, false);
@@ -236,8 +236,7 @@ hill_climbing_result simulated_annealing(
 
     std::uniform_real_distribution<> annealing_sampler(0, 1);
     
-    while (iteration < max_iterations) {        
-        
+    while (iteration < max_iterations) {
         bool move_accepted = false;
         std::vector<nni> neighborhood = compute_nni_neighborhood(current_tree);
         nni sampled_move = neighborhood[nni_sampler(gen)];
@@ -342,7 +341,7 @@ void search_optimal_tree(
     initial_phi = dist(gen);
     initial_nu = dist(gen);
     laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, false);
-    auto em_res = laml_expectation_maximization(t, model, 100, false);
+    auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
 

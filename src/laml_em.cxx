@@ -13,13 +13,14 @@
 #include "models/laml.h"
 #include "laml_em.h"
 
-#include <nlopt.hpp>
 #include "IpTNLP.hpp"
 #include "IpIpoptApplication.hpp"
 
-#define BRANCH_LENGTH_LB (1e-9)
+#define BRANCH_LENGTH_LB (1e-7)
 #define BRANCH_LENGTH_UB (1e9)
 #define NEGATIVE_INFINITY (-1e7)
+
+using namespace Ipopt;
 
 struct e_step_data {
     std::vector<std::array<double, 6>>& responsibilities;
@@ -87,14 +88,12 @@ double m_step_ultrametric_constraint(const std::vector<double>& parameters, std:
     return obj * 1.0;
 }
 
-double m_step_objective_and_grad(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
+static double obj_and_grad(const double* parameters, double* gradient, const e_step_data &m_data)
 {
-    e_step_data* m_data = static_cast<e_step_data*>(data);
-
-    std::vector<std::array<double, 6>>& responsibilities = m_data->responsibilities;
-    double leaf_responsibility = m_data->leaf_responsibility;
-    int num_missing = m_data->num_missing;
-    int num_not_missing = m_data->num_not_missing;
+    std::vector<std::array<double, 6>>& responsibilities = m_data.responsibilities;
+    double leaf_responsibility = m_data.leaf_responsibility;
+    int num_missing = m_data.num_missing;
+    int num_not_missing = m_data.num_not_missing;
 
     double nu = parameters[0];
     double phi = parameters[1];
@@ -103,8 +102,8 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
     double dnu = 0.0;
     double dphi = 0.0;
 
-    if (!gradient.empty()) {
-        for (size_t i = 0; i < gradient.size(); i++) {
+    if (gradient) {
+        for (size_t i = 0; i < responsibilities.size() + 3; i++) {
             gradient[i] = 0.0;
         }
     }
@@ -119,7 +118,7 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
         {
             result += -responsibilities[i][0] * blen * (1.0 + nu);
             dnu    += -responsibilities[i][0] * blen;
-            if (!gradient.empty()) gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
+            if (gradient) gradient[i + 2] += -responsibilities[i][0] * (1.0 + nu);
         }
 
         {
@@ -127,7 +126,7 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
             result += responsibilities[i][1] * (log_part - blen * nu);
             dnu -= responsibilities[i][1] * blen;
             double d_log_part = exp_blen / (1.0 - exp_blen);
-            if (!gradient.empty()) gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
+            if (gradient) gradient[i + 2] += responsibilities[i][1] * (d_log_part - nu);
         }
 
         {
@@ -136,13 +135,13 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
             double d_nu = (blen * exp_blen_nu) / val;
             dnu += (responsibilities[i][2] + responsibilities[i][4]) * d_nu;
             double d_blen = (nu * exp_blen_nu) / val;
-            if (!gradient.empty()) gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
+            if (gradient) gradient[i + 2] += (responsibilities[i][2] + responsibilities[i][4]) * d_blen;
         }
 
         {
             result += -responsibilities[i][3] * blen * nu;
             dnu -= responsibilities[i][3] * blen;
-            if (!gradient.empty()) gradient[i + 2] += -responsibilities[i][3] * nu;
+            if (gradient) gradient[i + 2] += -responsibilities[i][3] * nu;
         }
     }
 
@@ -155,38 +154,47 @@ double m_step_objective_and_grad(const std::vector<double>& parameters, std::vec
         dphi += (num_missing - leaf_responsibility) * (1.0 / phi);
     }
 
-    if (!gradient.empty()) gradient[0] = -dnu;
-    if (!gradient.empty()) gradient[1] = -dphi;
+    if (gradient) gradient[0] = -dnu;
+    if (gradient) gradient[1] = -dphi;
     for (size_t i = 0; i < responsibilities.size(); ++i) {
-        if (!gradient.empty()) gradient[i + 2] = -gradient[i + 2];
+        if (gradient) gradient[i + 2] = -gradient[i + 2];
     }
 
     return -result;
 }
 
-static inline double hess_nu_blen(const std::array<double,6>& resp,
-                                  double blen, double nu)
+static inline double hess_nu_nu(const std::array<double,6>& resp, double blen, double nu) {
+    double denom = std::exp(blen * nu) - 1.0;
+    double inv = 1.0 / (denom * denom);
+    return (resp[2]+resp[4]) * std::exp(blen*nu) * blen * blen * inv;
+}
+
+static inline double hess_nu_blen(const std::array<double,6>& resp, double blen, double nu)
 {
-    const double a    = std::exp(-nu * blen);       // e^{-νb}
-    const double val  = 1.0 - a;                    // 1-a
-    const double inv  = 1.0 / val;
-    const double inv2 = inv * inv;
+    const double denom  = std::exp(nu * blen) - 1.0;
+    const double inv  = 1.0 / denom;
 
-    const double c = resp[2] + resp[4];
-
-    double H = (resp[0] + resp[1] + resp[3]);       // linear terms
-    H += c * ( a * (1.0 - blen*nu) * inv           //   a(1-νb)/(1-a)
-             + blen * nu * a * a * inv2 );         // + νb a²/(1-a)²
+    double H = -(resp[0] + resp[1] + resp[3]);
+    H += (resp[2] + resp[4]) * (1 - nu * blen) * inv;
+    H += (resp[2] + resp[4]) * (- nu * blen) * (1 - nu * blen) * inv * inv;
     return H;
 }
 
-using namespace Ipopt;
+static inline double hess_blen_blen(const std::array<double,6>& resp, double blen, double nu)
+{
+    const double denom1  = std::exp(blen) - 1.0;
+    const double inv1  = 1.0 / (denom1 * denom1);
+    const double denom2  = std::exp(nu * blen) - 1.0;
+    const double inv2  = 1.0 / (denom2 * denom2);
+    return std::exp(blen) * resp[1] * inv1 + std::exp(nu*blen)*nu*nu*(resp[2]+resp[4]) * inv2;
+}
 
 class MStepProblem : public TNLP {
     private:
     e_step_data data;
     tree t;
     std::vector<double> init;
+    std::vector<double> solution;
 
     public:
     MStepProblem(e_step_data data, tree t, std::vector<double> init) : data(data), t(t), init(init)
@@ -249,9 +257,7 @@ class MStepProblem : public TNLP {
         Number& obj_value
     )
     {
-        std::vector<double> params(n), empty_grad;
-        for (int i=0; i<n; i++) params[i] = x[i];
-        obj_value = m_step_objective_and_grad(params, empty_grad, &data);
+        obj_value = obj_and_grad(x, nullptr, data);
         return true;
     }
 
@@ -261,10 +267,7 @@ class MStepProblem : public TNLP {
         bool new_x,
         Number* grad_f
     ) {
-        std::vector<double> params(n), grad(n);
-        for (int i=0; i<n; i++) params[i] = x[i];
-        m_step_objective_and_grad(params, grad, &data);
-        for (int i=0; i<n; i++) grad_f[i] = grad[i];
+        obj_and_grad(x, grad_f, data);
         return true;
     }
 
@@ -282,63 +285,35 @@ class MStepProblem : public TNLP {
         Number*       values
     )
     {
-        const int B = t.num_nodes;          // number of branch lengths
+        const int B = t.num_nodes;
 
         if (!values) {
             Index k = 0;
             iRow[k] = jCol[k] = 0; ++k;
-            iRow[k] = jCol[k] = 1; ++k;           // (φ,φ)
-            for (int i = 0; i < B; ++i) {                          // (bᵢ,bᵢ)
-                iRow[k] = jCol[k] = 2+i; ++k;
+            iRow[k] = jCol[k] = 1; ++k;
+            for (int i = 0; i < B; i++) {
+                iRow[k] = jCol[k] = i+2; ++k;
             }
-            for (int i = 0; i < B; ++i) {                          // (bᵢ,ν)
-                iRow[k] = 2+i;    jCol[k] = 0; ++k;
+            for (int i = 0; i < B; i++) {
+                iRow[k] = i+2; jCol[k] = 0; ++k;
             }
-            assert(k == nele_hess);
             return true;
         }
 
-        /* --- 2. numerical values --------------------------------------- */
         const double nu  = x[0];
         const double phi = x[1];
 
-        /* pre-compute pieces that appear in many branches */
         double h_nu_nu  = 0.0, h_phi_phi = 0.0;
         std::vector<double> h_bb(B), h_nu_b(B);
 
-        /* ---- gather per-branch contributions ---- */
-        for (int i = 0; i < B; ++i) {
-            double blen = x[2+i];
+        for (int i = 0; i < B; i++) {
+            double blen = x[i+2];
             const auto& r = data.responsibilities[i];
-
-            /* (ν,ν) term ------------------------------------------------- */
-            {   // contributions from all four blocks
-                double a   = std::exp(-blen * nu);
-                double val = 1.0 - a;
-                double inv = 1.0 / val;
-                h_nu_nu += r[0]*0.0
-                        + r[1]*0.0
-                        + r[3]*0.0
-                        + (r[2]+r[4]) * ( blen*blen * a * inv
-                                        - blen*blen * a*a * inv*inv );
-            }
-
-            /* (bᵢ,bᵢ) diagonal ------------------------------------------ */
-            {
-                double a    = std::exp(-blen * nu);
-                double val  = 1.0 - a;
-                double inv  = 1.0 / val;
-                double inv2 = inv * inv;
-                h_bb[i] = (r[0] + r[1] + r[3])
-                        + (r[2]+r[4]) * (  nu*nu * a * inv
-                                        - nu*nu * a*a * inv2 );
-            }
-
-            /* (bᵢ,ν) mixed ---------------------------------------------- */
-            h_nu_b[i] = hess_nu_blen(r, blen, nu);
+            h_nu_nu += hess_nu_nu(r, blen, nu);
+            h_bb[i] = hess_blen_blen(r, blen, nu);
+            h_nu_b[i] = -hess_nu_blen(r, blen, nu);
         }
 
-        /* φ-φ block (no coupling with others) ----------------------------- */
         {
             double inv1 = 1.0 / (1.0 - phi);
             double inv2 = 1.0 / phi;
@@ -346,18 +321,11 @@ class MStepProblem : public TNLP {
                     + (data.num_missing - data.leaf_responsibility) * inv2*inv2;
         }
 
-        /* ---- 3. write triplet values (already in lower triangle) ------- */
         Index k = 0;
-        values[k++] = obj_factor * h_nu_nu;                 // (ν,ν)
-        values[k++] = obj_factor * h_phi_phi;               // (φ,φ)
-
-        for (int i = 0; i < B; ++i)                         // (bᵢ,bᵢ)
-            values[k++] = obj_factor * h_bb[i];
-
-        for (int i = 0; i < B; ++i)                         // (bᵢ,ν)
-            values[k++] = obj_factor * h_nu_b[i];
-
-        assert(k == nele_hess);
+        values[k++] = obj_factor * h_nu_nu;
+        values[k++] = obj_factor * h_phi_phi;
+        for (int i = 0; i < B; i++) values[k++] = obj_factor * h_bb[i];
+        for (int i = 0; i < B; i++) values[k++] = obj_factor * h_nu_b[i];
         return true;
     }
 
@@ -397,7 +365,12 @@ class MStepProblem : public TNLP {
         const IpoptData* ip_data,
         IpoptCalculatedQuantities* ip_cq
     ) {
+        for (int i = 0; i < n; i++) solution.push_back(x[i]);
         return;
+    }
+
+    std::vector<double> get_solution() {
+        return solution;
     }
 };
 
@@ -593,52 +566,23 @@ em_results laml_expectation_maximization(
     }
 
     bool enforce_ultrametric = model.ultrametric;
-
-    // set up the M-step solver
-    nlopt::opt local_opt(nlopt::LD_CCSAQ, t.num_nodes + 3);
-    nlopt::opt opt(nlopt::LD_AUGLAG_EQ, t.num_nodes + 3);
-
     auto paths = root_to_leaf_paths(t);
-    if (enforce_ultrametric) {
-        opt.add_equality_constraint(m_step_ultrametric_constraint, &paths, 1e-3);
-    }
     
     std::vector<double> params(t.num_nodes + 3);
-    std::vector<double> lb(t.num_nodes + 3, BRANCH_LENGTH_LB);
-    std::vector<double> ub(t.num_nodes + 3, BRANCH_LENGTH_UB);
-    ub[1] = 1.0 - 1e-5; // phi in [0, 1]
-
-    local_opt.set_xtol_rel(1e-6);
-    opt.set_lower_bounds(lb);
-    opt.set_upper_bounds(ub);
-    opt.set_xtol_rel(1e-6);
-    opt.set_local_optimizer(local_opt);
-
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
-    app->Options()->SetNumericValue("tol", 1e-3);
-    app->Options()->SetNumericValue("derivative_test_perturbation", 1e-8);
-    app->Options()->SetNumericValue("derivative_test_tol", 1e-1);
-    app->Options()->SetStringValue("derivative_test","second-order"); // one-off check
-    // app->Options()->SetNumericValue("mu_init", 1e-2);
-    // app->Options()->SetIntegerValue("max_iter", 5000);
-    // app->Options()->SetStringValue("mu_strategy", "adaptive");
-    // app->Options()->SetStringValue("linear_solver", "lapack");
-    // app->Options()->SetStringValue("mu_oracle", "quality_function");
-    // app->Options()->SetStringValue("warm_start_init_point", "yes");
-    // app->Options()->SetStringValue ("hessian_approximation",  "limited-memory");
-    // app->Options()->SetIntegerValue("limited_memory_max_history", 4);
-    // app->Options()->SetIntegerValue("limited_memory_max_skipping", 5);
-    // app->Options()->SetIntegerValue("limited_memory_reset_frequency", 20);
+    app->Options()->SetNumericValue("tol", 1e-5);
+    app->Options()->SetIntegerValue("print_level", 0);
+    app->Options()->SetStringValue("mu_strategy", "monotone");
+    app->Options()->SetStringValue("nlp_scaling_method", "none");
 
     ApplicationReturnStatus status;
     status = app->Initialize();
     if (status != Solve_Succeeded) {
-        throw std::runtime_error("*** Error during initialization!");
+        throw std::runtime_error("*** Error during initialization! ***");
     }
 
     // initialize model parameters
     std::vector<double> internal_comp_buffer(max_alphabet_size);
-
     auto model_data = model.initialize_data(t.tree, t.branch_lengths, &internal_comp_buffer);
 
     params[0] = model.parameters[0];
@@ -671,19 +615,12 @@ em_results laml_expectation_maximization(
             spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
         }
 
-        std::vector<double> saved_params = params;
         double fx;
         try {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
-            //std::unique_ptr<TNLP> prob(new MStepProblem(params_data, t, params));
-            std::vector<double> fake_grad;
-            double obj_before = m_step_objective_and_grad(params, fake_grad, &params_data);
-            SmartPtr<TNLP> prob = new MStepProblem(params_data, t, params);
+            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params);
             app->OptimizeTNLP(prob);
-            opt.set_min_objective(m_step_objective_and_grad, &params_data); 
-            auto res = opt.optimize(params, fx);
-            double obj_after = m_step_objective_and_grad(params, fake_grad, &params_data);
-            spdlog::info("Obj before {} and after {}", obj_before, obj_after);
+            params = prob->get_solution();
         } catch (const std::runtime_error &e) {
             throw e;
         }
