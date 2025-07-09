@@ -337,6 +337,7 @@ void print_result_summary(const phylogeny_data& result) {
     spdlog::info("Number of characters: {}", result.num_characters);
     spdlog::info("Max alphabet size: {}", result.max_alphabet_size);
     spdlog::info("Data type: {}\n", result.data_type);
+    return;
 
     spdlog::info("Mutation priors:");
     for (size_t i = 0; i < result.mutation_priors.size(); ++i) {

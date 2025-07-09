@@ -16,8 +16,8 @@
 #include "IpTNLP.hpp"
 #include "IpIpoptApplication.hpp"
 
-#define BRANCH_LENGTH_LB (1e-7)
-#define BRANCH_LENGTH_UB (1e9)
+#define BRANCH_LENGTH_LB (1e-8)
+#define BRANCH_LENGTH_UB (1e8)
 #define NEGATIVE_INFINITY (-1e7)
 
 using namespace Ipopt;
@@ -56,39 +56,17 @@ std::vector<std::vector<int>> root_to_leaf_paths(const tree& t) {
     return paths;
 }
 
-double m_step_ultrametric_constraint(const std::vector<double>& parameters, std::vector<double>& gradient, void* data)
+double m_step_ultrametric_constraint(int n, const double* parameters, std::vector<int>& path)
 {
-    std::vector<std::vector<int>>* paths = static_cast<std::vector<std::vector<int>>*>(data);
-
-    for (size_t i = 0; i < gradient.size(); i++) {
-        if (!gradient.empty()) gradient[i] = 0.0;
-    }
-
     double obj = 0.0;
-    for (auto path : *paths) {
-        double blen_sum = 0.0;
-        for (auto node : path) {
-            double blen = parameters[node + 2];
-            blen_sum += blen;
-        } 
-
-        for(auto node : path) {
-            if (!gradient.empty()) gradient[node + 2] += blen_sum - parameters[parameters.size() - 1];
-        }
-
-        if (!gradient.empty()) gradient[parameters.size() - 1] = parameters[parameters.size() - 1] - blen_sum;
-
-        obj += 0.5 * (blen_sum - parameters[parameters.size() - 1]) * (blen_sum - parameters[parameters.size() - 1]);
-    }
-
-    for (size_t i = 0; i < gradient.size(); i++) {
-        if (!gradient.empty()) gradient[i] *= 1.0;
-    }
-
-    return obj * 1.0;
+    for (auto node : path) {
+        double blen = parameters[node + 2];
+        obj += blen;
+    } 
+    return obj - parameters[n - 1];
 }
 
-static double obj_and_grad(const double* parameters, double* gradient, const e_step_data &m_data)
+double m_step_obj_and_grad(const double* parameters, double* gradient, const e_step_data &m_data)
 {
     std::vector<std::array<double, 6>>& responsibilities = m_data.responsibilities;
     double leaf_responsibility = m_data.leaf_responsibility;
@@ -195,10 +173,15 @@ class MStepProblem : public TNLP {
     tree t;
     std::vector<double> init;
     std::vector<double> solution;
+    bool ultrametric;
+    std::vector<std::vector<int>> paths;
 
     public:
-    MStepProblem(e_step_data data, tree t, std::vector<double> init) : data(data), t(t), init(init)
-    { }
+    MStepProblem(e_step_data data, tree t, std::vector<double> init, bool ultrametric = true) 
+    : data(data), t(t), init(init), ultrametric(ultrametric)
+    { 
+        if (ultrametric) paths = root_to_leaf_paths(t);
+    }
 
     bool get_nlp_info(
         Index& n,
@@ -209,8 +192,9 @@ class MStepProblem : public TNLP {
     )
     {
         n = t.num_nodes + 3;
-        m = 0;
+        m = ultrametric ? paths.size() : 0;
         nnz_jac_g = 0;
+        for(auto p : paths) nnz_jac_g += p.size() + 1;
         nnz_h_lag = 2 * t.num_nodes + 2;
         index_style = TNLP::C_STYLE;
         return true;
@@ -230,6 +214,11 @@ class MStepProblem : public TNLP {
             x_u[i] = BRANCH_LENGTH_UB;
         }
 
+        for (size_t i=0; i < paths.size(); i++) {
+            g_l[i] = 0.0;
+            g_u[i] = 0.0;
+        }
+        
         x_u[1] = 1.0 - 1e-5; // set phi \in [0, 1]
         return true;
     }
@@ -257,7 +246,7 @@ class MStepProblem : public TNLP {
         Number& obj_value
     )
     {
-        obj_value = obj_and_grad(x, nullptr, data);
+        obj_value = m_step_obj_and_grad(x, nullptr, data);
         return true;
     }
 
@@ -267,7 +256,7 @@ class MStepProblem : public TNLP {
         bool new_x,
         Number* grad_f
     ) {
-        obj_and_grad(x, grad_f, data);
+        m_step_obj_and_grad(x, grad_f, data);
         return true;
     }
 
@@ -309,8 +298,8 @@ class MStepProblem : public TNLP {
         for (int i = 0; i < B; i++) {
             double blen = x[i+2];
             const auto& r = data.responsibilities[i];
-            h_nu_nu += hess_nu_nu(r, blen, nu);
-            h_bb[i] = hess_blen_blen(r, blen, nu);
+            h_nu_nu  += hess_nu_nu(r, blen, nu);
+            h_bb[i]   = hess_blen_blen(r, blen, nu);
             h_nu_b[i] = -hess_nu_blen(r, blen, nu);
         }
 
@@ -336,6 +325,7 @@ class MStepProblem : public TNLP {
       Index         m,
       Number*       g
     ) {
+        for (int i = 0; i < m; i++)  g[i] = m_step_ultrametric_constraint(n, x, paths[i]);
         return true;
     }
 
@@ -349,6 +339,34 @@ class MStepProblem : public TNLP {
       Index*        jCol,
       Number*       values
     ) {
+        if (!values && ultrametric) {
+            int k = 0;
+            for(int i = 0; i < m; i++) {
+                for (auto node : paths[i]) {
+                    iRow[k] = i;
+                    jCol[k] = node + 2;
+                    k++;
+                }
+
+                iRow[k] = i;
+                jCol[k] = n - 1;
+                k++;
+            }
+            return true;
+        }
+
+        int k = 0;
+        for (int i = 0; i < m; i++) {
+            for (auto node : paths[i]) {
+                (void) node;
+                values[k] = 1.0;
+                k++;
+            }
+
+            values[k] = -1;
+            k++;
+        }
+
         return true;
     }
 
@@ -497,23 +515,7 @@ void print_likelihood_buffer(const std::string& label,
                              const likelihood_buffer& buf,
                              size_t num_characters,
                              size_t max_alphabet_size,
-                             size_t num_nodes) {
-    /*spdlog::info("=== {} ===", label);
-    for (size_t c = 0; c < num_characters; ++c) {
-        spdlog::info("Character {}", c);
-        for (size_t n = 0; n < num_nodes; ++n) {
-            std::ostringstream oss;
-            oss << "  Node " << n << ": [";
-            for (size_t a = 0; a < max_alphabet_size; ++a) {
-                oss << std::fixed << std::setprecision(4) << buf(c, n, a);
-                if (a + 1 < max_alphabet_size) oss << ", ";
-            }
-            oss << "]";
-            spdlog::info("{}", oss.str());
-        }
-    }
-    spdlog::info("=======================");*/
-}
+                             size_t num_nodes) {}
 
 em_results laml_expectation_maximization(
     tree& t, 
@@ -564,16 +566,12 @@ em_results laml_expectation_maximization(
             t.branch_lengths[i] = BRANCH_LENGTH_UB - 1e-9;
         }
     }
-
-    bool enforce_ultrametric = model.ultrametric;
-    auto paths = root_to_leaf_paths(t);
     
     std::vector<double> params(t.num_nodes + 3);
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
-    app->Options()->SetNumericValue("tol", 1e-5);
+    app->Options()->SetNumericValue("tol", 1e-3);
+    app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     app->Options()->SetIntegerValue("print_level", 0);
-    app->Options()->SetStringValue("mu_strategy", "monotone");
-    app->Options()->SetStringValue("nlp_scaling_method", "none");
 
     ApplicationReturnStatus status;
     status = app->Initialize();
@@ -615,14 +613,14 @@ em_results laml_expectation_maximization(
             spdlog::info("Nu: {} Phi: {}", model.parameters[0], model.parameters[1]);
         }
 
-        double fx;
-        try {
+        {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
-            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params);
-            app->OptimizeTNLP(prob);
+            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric);
+            ApplicationReturnStatus status = app->OptimizeTNLP(prob);
+            if (status != Solve_Succeeded) {
+                throw std::runtime_error("Solver failed.");
+            }
             params = prob->get_solution();
-        } catch (const std::runtime_error &e) {
-            throw e;
         }
 
         model.parameters[0] = params[0];
@@ -640,8 +638,8 @@ em_results laml_expectation_maximization(
             llh_after += likelihood[character];
         }
         
-        const double tolerance = 1e-8;
-        if (llh_after < llh_before - tolerance) {
+        const double tolerance = 1e-5;
+        if (llh_after < llh_before - tolerance && (!model.ultrametric || i != 0)) {
             spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
             throw std::runtime_error("LLH decreased significantly in M-step.");
         }
@@ -649,7 +647,7 @@ em_results laml_expectation_maximization(
 
         llh = llh_after;
 
-        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION) {
+        if ((llh_after - llh_before) / abs(llh_before) < EM_STOPPING_CRITERION && (!model.ultrametric || i != 0)) {
             break;
         }
     }
@@ -663,7 +661,7 @@ em_results laml_expectation_maximization(
 
     results.posterior_llh.resize(num_characters, std::vector<std::vector<double>>(num_nodes, std::vector<double>(alphabet_size, 0.0)));
 
-    for (size_t c = 0; c < num_characters; ++c) {
+    for (int c = 0; c < num_characters; ++c) {
         for (size_t n = 0; n < num_nodes; ++n) {
             std::vector<double> log_post(alphabet_size, -std::numeric_limits<double>::infinity());
 

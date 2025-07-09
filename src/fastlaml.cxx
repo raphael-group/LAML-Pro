@@ -147,7 +147,10 @@ void write_results(
     }
 }
 
-void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed, std::string output_prefix) {
+void optimize_parameters(
+    tree& t, const phylogeny_data& data, unsigned int seed, 
+    std::string output_prefix, bool is_ultrametric
+) {
     spdlog::info("Optimizing model parameters and branch lengths...");
 
     std::mt19937 gen(seed);
@@ -164,13 +167,13 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
     for (size_t node_id = 0; node_id < t.num_nodes; ++node_id) {
         if (node_id >= t.node_names.size() || t.node_names[node_id].empty()) {
             if (node_id >= t.node_names.size()) {
-                t.node_names.resize(t.num_nodes);  // Ensure size matches num_nodes
+                t.node_names.resize(t.num_nodes); // Ensure size matches num_nodes
             }
             t.node_names[node_id] = "internal_" + std::to_string(node_id);
         }
     }
 
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, false);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     auto end = std::chrono::high_resolution_clock::now();
@@ -179,12 +182,6 @@ void optimize_parameters(tree& t, const phylogeny_data& data, unsigned int seed,
 
     auto newick_tree = write_newick_tree(t);
     write_tree(newick_tree, output_prefix + "_tree.newick");
-
-    spdlog::info("Fitting branch lengths to ultrametric tree...");
-    ultrametric_projection(t);
-    newick_tree = write_newick_tree(t);
-    write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
-
     write_results(t, output_prefix, em_res, model, command, runtime, std::vector<double>());
 
     spdlog::info("Optimization completed. Log likelihood: {}", em_res.log_likelihood);
@@ -204,7 +201,8 @@ hill_climbing_result simulated_annealing(
     double initial_nu, 
     unsigned int max_iterations,
     unsigned int num_threads,
-    double temp = 0.00001 
+    bool is_ultrametric,
+    double T0 = 0.1
 ) {    
     // Initialize simulated annealing parameters, inheriting from LAML
     const double alpha = 0.99;
@@ -212,10 +210,9 @@ hill_climbing_result simulated_annealing(
     size_t no_improve_counter = 0;
     const size_t max_no_improve = 100; // number of small-improvement moves allowed
     const double eta = 1e-8; // minimum improvement
-    const double T0 = temp; // starting temperature
 
     tree current_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, false);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, is_ultrametric);
     auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
     double current_log_likelihood = initial_result.log_likelihood;
     
@@ -321,7 +318,8 @@ hill_climbing_result simulated_annealing(
 
 void search_optimal_tree(
     tree& t, const phylogeny_data& data, unsigned int seed, 
-    unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp
+    unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp,
+    bool is_ultrametric
 ) {
     spdlog::info("Searching for optimal tree...");
 
@@ -335,12 +333,12 @@ void search_optimal_tree(
     double initial_nu = dist(gen);
 
     // perform hill climbing
-    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, temp);
+    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, is_ultrametric, temp);
     t = result.best_tree;
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, false);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
@@ -362,12 +360,6 @@ void search_optimal_tree(
     spdlog::info("Writing best tree to file...");
     auto newick_tree = write_newick_tree(t);
     write_tree(newick_tree, output_prefix + "_tree.newick");
-
-    spdlog::info("Fitting branch lengths to ultrametric tree...");
-    ultrametric_projection(t);
-    newick_tree = write_newick_tree(t);
-    write_tree(newick_tree, output_prefix + "_ultrametric_tree.newick");
-    
     write_results(t, output_prefix, em_res, model, command, runtime, result.log_likelihoods);
     
     spdlog::info("Tree search and optimization completed. Log likelihood: {}", em_res.log_likelihood);
@@ -426,6 +418,11 @@ int main(int argc, char** argv) {
         .default_value(false)
         .implicit_value(true);
 
+    program.add_argument("-u", "--ultrametric")
+        .help("Enforce ultrametric constraint during optimization.")
+        .default_value(false)
+        .implicit_value(true);
+
     program.add_argument("--threads")
         .help("number of threads to use")
         .default_value(std::thread::hardware_concurrency())
@@ -447,8 +444,8 @@ int main(int argc, char** argv) {
         .scan<'u', unsigned int>();
 
     program.add_argument("--temp")
-        .help("Temperature for fixed temp topology search")
-        .default_value(0.00001)
+        .help("Starting temperature for topology search")
+        .default_value(0.1)
         .scan<'g', double>();
 
     try {
@@ -515,14 +512,15 @@ int main(int argc, char** argv) {
     std::string mode = program.get<std::string>("--mode");
     
     if (mode == "optimize") {
-        optimize_parameters(t, data, seed, program.get<std::string>("--output"));
+        optimize_parameters(t, data, seed, program.get<std::string>("--output"), program.get<bool>("--ultrametric"));
     } else {
         search_optimal_tree(
             t, data, seed, 
             program.get<unsigned int>("--threads"), 
             program.get<std::string>("--output"),
             program.get<unsigned int>("--max-iterations"),
-            program.get<double>("--temp")
+            program.get<double>("--temp"),
+            program.get<bool>("--ultrametric")
         );
     }
 
