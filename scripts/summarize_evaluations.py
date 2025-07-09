@@ -66,6 +66,7 @@ def parse_fast_laml_results(true_newick_file, starting_tree_newick, subdir):
 
     with open(res_path, 'r') as f:
         res = json.load(f)
+        row['initial_log_likelihood'] = res['log_likelihoods'][0]
         row['best_log_likelihood'] = res['best_log_likelihood']
         row['runtime'] = res['runtime_ms']
         row['est_nu'] = res['nu']
@@ -89,7 +90,7 @@ def parse_fast_laml_results(true_newick_file, starting_tree_newick, subdir):
     return row
 
 if __name__ == '__main__':
-    simulations_dir = "/n/fs/ragr-research/projects/laml-pro/sim_data/set_3/input/"
+    simulations_dir = "/n/fs/ragr-research/projects/laml-pro/sim_data/set_3d/input/"
 
     jobs = []
     for directory in os.listdir("nextflow_results/fast-laml"):
@@ -112,6 +113,7 @@ if __name__ == '__main__':
         row = parse_fast_laml_results(job['true_tree'], job['starting_tree'], job['subdirectory'])
         row = row | job["data"]
         row['starting_tree'] = job["starting_tree_type"]
+        print(row)
         return row
 
     with Pool(64) as p:

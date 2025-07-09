@@ -1,22 +1,51 @@
 params.root_dir       = '/n/fs/ragr-research/projects/fast-laml/'
-params.sim_dir        = "/n/fs/ragr-research/projects/laml-pro/sim_data/set_3/input/"
+params.sim_dir        = "/n/fs/ragr-research/projects/laml-pro/sim_data/set_3d/input/"
 params.fast_laml      = "${params.root_dir}/build/src/fastlaml"
 params.outdir         = "${params.root_dir}/nextflow_results"
 
 params.generation_script = "${params.root_dir}/scripts/generate_starting_trees.R"
 params.R_bin = '/n/fs/ragr-data/users/schmidt/miniconda3/envs/breaked/bin/Rscript'
 
+def create_instances(cells, replicate) {
+  return [
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.0', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.0439', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.135', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.249', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.36', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.458', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.539', dropout_rate: '0.0'],
+    [id: "k400_s0_sub${cells}_r${replicate}",  gaussian_overlap: '0.607', dropout_rate: '0.0'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.0', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.0439', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.135', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.249', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.36', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.458', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.539', dropout_rate: '0.1875'],
+    [id: "k400_s15_sub${cells}_r${replicate}", gaussian_overlap: '0.607', dropout_rate: '0.1875']
+  ]
+}
+
 params.instances = [
-    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
-    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
-    [id: 'k400_s134_sub100_r01', gaussian_overlap: 0.3, dropout_rate: 0.1],
-    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
-    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
-    [id: 'k400_s134_sub200_r01', gaussian_overlap: 0.3, dropout_rate: 0.1],
-    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.01, dropout_rate: 0.1],
-    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.1, dropout_rate: 0.1],
-    [id: 'k400_s134_sub300_r01', gaussian_overlap: 0.3, dropout_rate: 0.1]
-]
+    create_instances("100", "01"),
+    // create_instances("100", "02"),
+    // create_instances("100", "03"),
+    // create_instances("100", "04"),
+    // create_instances("100", "05"),
+    create_instances("200", "01"),
+    // create_instances("200", "02"),
+    // create_instances("200", "03"),
+    // create_instances("200", "04"),
+    // create_instances("200", "05"),
+    // create_instances("300", "01"),
+    // create_instances("300", "02"),
+    // create_instances("300", "03"),
+    // create_instances("300", "04"),
+    // create_instances("300", "05")
+].collectMany { it }
+
+
 
 process generate_starting_trees {
     memory '2 GB'
@@ -42,6 +71,7 @@ process fast_laml {
     time '4h'
     cpus 1
 
+    clusterOptions '--partition=preempt'
     stageInMode 'copy'
     publishDir "${params.outdir}/fast-laml/${id}/${starting_tree_id}/", mode: 'copy'
 
@@ -76,8 +106,8 @@ workflow {
         dir_prefix              = "${params.sim_dir}/${id}/"
         character_matrix        = file("${params.sim_dir}/${id}/character_matrix.csv")
         tree                    = file("${params.sim_dir}/${id}/tree.nwk")
-        argmax_character_matrix = file("${params.sim_dir}/${id}/${id}_r${gaussian_overlap}_p${dropout_rate}_argmax.csv")
-        observation_matrix      = file("${params.sim_dir}/${id}/${id}_r${gaussian_overlap}_p${dropout_rate}_scores.format.csv")
+        argmax_character_matrix = file("${params.sim_dir}/${id}/${id}_dim3_r${gaussian_overlap}_p${dropout_rate}_argmax.csv")
+        observation_matrix      = file("${params.sim_dir}/${id}/${id}_dim3_r${gaussian_overlap}_p${dropout_rate}_scores.csv")
         ["${id}_r${gaussian_overlap}_p${dropout_rate}", tree, character_matrix, argmax_character_matrix, observation_matrix]
     }
 
