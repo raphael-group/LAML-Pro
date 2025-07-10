@@ -16,7 +16,7 @@
 #include "IpTNLP.hpp"
 #include "IpIpoptApplication.hpp"
 
-#define BRANCH_LENGTH_LB (1e-8)
+#define BRANCH_LENGTH_LB (1e-6)
 #define BRANCH_LENGTH_UB (1e8)
 #define NEGATIVE_INFINITY (-1e7)
 
@@ -213,6 +213,9 @@ class MStepProblem : public TNLP {
             x_l[i] = BRANCH_LENGTH_LB;
             x_u[i] = BRANCH_LENGTH_UB;
         }
+
+        x_l[0] = 1e-4;
+        x_l[1] = 1e-4;
 
         for (size_t i=0; i < paths.size(); i++) {
             g_l[i] = 0.0;
@@ -569,9 +572,13 @@ em_results laml_expectation_maximization(
     
     std::vector<double> params(t.num_nodes + 3);
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
-    app->Options()->SetNumericValue("tol", 1e-3);
-    app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     app->Options()->SetIntegerValue("print_level", 0);
+    app->Options()->SetNumericValue("tol", 1e-3);
+    app->Options()->SetStringValue("jac_c_constant", "yes");
+    // app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
+    // app->Options()->SetStringValue("derivative_test", "second-order");
+    // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
+    // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
 
     ApplicationReturnStatus status;
     status = app->Initialize();
