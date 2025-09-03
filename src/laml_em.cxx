@@ -366,7 +366,7 @@ class MStepProblem : public TNLP {
                 k++;
             }
 
-            values[k] = -1;
+            values[k] = -1.0;
             k++;
         }
 
@@ -575,7 +575,7 @@ em_results laml_expectation_maximization(
     app->Options()->SetIntegerValue("print_level", 0);
     app->Options()->SetNumericValue("tol", 1e-3);
     app->Options()->SetStringValue("jac_c_constant", "yes");
-    // app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
+    app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     // app->Options()->SetStringValue("derivative_test", "second-order");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
     // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
