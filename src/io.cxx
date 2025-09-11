@@ -144,9 +144,9 @@ std::tuple<
     std::set<std::pair<int, int>> character_key_set;
     std::vector<std::tuple<std::string, std::pair<int, int>, std::vector<double>>> parsed_rows;
 
+    std::size_t max_num_states = 0; 
     try {
         csv::CSVReader reader(filename);
-       
         std::vector<std::string> col_names = reader.get_col_names();
 
         for (auto& row: reader) {
@@ -170,6 +170,7 @@ std::tuple<
                     }
                 }
             }
+            max_num_states = std::max(max_num_states, state_probs.size());
 
             parsed_rows.emplace_back(taxon_name, character_key, state_probs);
             if (taxa_index_map.find(taxon_name) == taxa_index_map.end()) {
@@ -197,7 +198,7 @@ std::tuple<
     std::vector<std::vector<std::vector<double>>> matrix(
         taxa_names.size(), // num_taxa as rows, num columns (cassette_idx, target_site)
                            // num state probabilities 
-        std::vector<std::vector<double>>(character_keys.size(), std::vector<double>(4, NEGATIVE_INFINITY))
+        std::vector<std::vector<double>>(character_keys.size(), std::vector<double>(max_num_states, NEGATIVE_INFINITY))
     );
 
     // fill in the matrix
