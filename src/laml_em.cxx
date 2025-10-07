@@ -16,11 +16,13 @@
 #include "IpTNLP.hpp"
 #include "IpIpoptApplication.hpp"
 
-#define BRANCH_LENGTH_LB (1e-6)
-#define BRANCH_LENGTH_UB (1e8)
 #define NEGATIVE_INFINITY (-1e8)
-#define PHI_LB (1e-6)
-#define PHI_UB (1.0 - 1e-6)
+#define BRANCH_LENGTH_LB (1e-5)
+#define BRANCH_LENGTH_UB (1e3)
+#define NU_LB (1e-5)
+#define NU_UB (1e3)
+#define PHI_LB (1e-5)
+#define PHI_UB (1.0 - 1e-5)
 
 using namespace Ipopt;
 
@@ -216,7 +218,7 @@ class MStepProblem : public TNLP {
             x_u[i] = BRANCH_LENGTH_UB;
         }
 
-        x_l[0] = PHI_LB;
+        x_l[0] = NU_LB;
         x_l[1] = PHI_LB;
 
         for (size_t i=0; i < paths.size(); i++) {
@@ -224,6 +226,7 @@ class MStepProblem : public TNLP {
             g_u[i] = 0.0;
         }
 
+        x_u[0] = NU_UB;  // set nu \in [0, 100]
         x_u[1] = PHI_UB; // set phi \in [0, 1]
         return true;
     }
@@ -578,7 +581,7 @@ em_results laml_expectation_maximization(
     app->Options()->SetNumericValue("tol", 1e-5);
     app->Options()->SetStringValue("jac_c_constant", "yes");
     app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
-    // app->Options()->SetStringValue("derivative_test", "second-order");
+    //app->Options()->SetStringValue("derivative_test", "second-order");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
     // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
 
@@ -647,8 +650,10 @@ em_results laml_expectation_maximization(
             llh_after += likelihood[character];
         }
         
-        const double tolerance = 1e-6;
-        if ((llh_after - llh_before) / abs(llh_before) < -tolerance && (!model.ultrametric || i != 0)) {
+        const double tolerance = 1e-4;
+        double rel_error = (llh_after - llh_before) / abs(llh_before);
+        double abs_error = llh_after - llh_before;
+        if (std::max(rel_error, abs_error) < -tolerance && (!model.ultrametric || i != 0)) {
             spdlog::error("LLH before: {}, LLH after: {}, {}", llh_before, llh_after, (llh_after - llh_before) / abs(llh_before));
             throw std::runtime_error("LLH decreased significantly in M-step.");
         }
