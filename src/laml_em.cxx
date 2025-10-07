@@ -18,7 +18,9 @@
 
 #define BRANCH_LENGTH_LB (1e-6)
 #define BRANCH_LENGTH_UB (1e8)
-#define NEGATIVE_INFINITY (-1e7)
+#define NEGATIVE_INFINITY (-1e8)
+#define PHI_LB (1e-6)
+#define PHI_UB (1.0 - 1e-6)
 
 using namespace Ipopt;
 
@@ -214,15 +216,15 @@ class MStepProblem : public TNLP {
             x_u[i] = BRANCH_LENGTH_UB;
         }
 
-        x_l[0] = 1e-4;
-        x_l[1] = 1e-4;
+        x_l[0] = PHI_LB;
+        x_l[1] = PHI_LB;
 
         for (size_t i=0; i < paths.size(); i++) {
             g_l[i] = 0.0;
             g_u[i] = 0.0;
         }
-        
-        x_u[1] = 1.0 - 1e-5; // set phi \in [0, 1]
+
+        x_u[1] = PHI_UB; // set phi \in [0, 1]
         return true;
     }
 
@@ -328,7 +330,7 @@ class MStepProblem : public TNLP {
       Index         m,
       Number*       g
     ) {
-        for (int i = 0; i < m; i++)  g[i] = m_step_ultrametric_constraint(n, x, paths[i]);
+        for (int i = 0; i < m; i++) g[i] = m_step_ultrametric_constraint(n, x, paths[i]);
         return true;
     }
 
@@ -427,7 +429,7 @@ void laml_expectation_step(
             double log_C_zero_zero = p_zero + inside_ll(character, root, 1) - blen * (1.0 + nu)  - likelihoods[character];
             double log_C_zero_miss = p_zero + inside_ll(character, root, 0) + node_data[root].v2 - likelihoods[character];
 
-            double log_C_zero_alpha = -1e12;
+            double log_C_zero_alpha = NEGATIVE_INFINITY;
             if (alphabet_size > 2) {
                 for (size_t j = 0; j < alphabet_size - 2; j++) {
                     tmp_buffer[j]  = p_zero + inside_ll(character, root, j + 2);
@@ -468,9 +470,9 @@ void laml_expectation_step(
             double log_C_miss_miss = outside_ll(character, u, 0) + edge_inside_ll(character, w, 0) 
                                    + inside_ll(character, v, 0) - likelihoods[character];
 
-            double log_C_zero_alpha = -1e12;
-            double log_C_alpha_alpha = -1e12;
-            double log_C_alpha_miss = -1e12;
+            double log_C_zero_alpha = NEGATIVE_INFINITY;
+            double log_C_alpha_alpha = NEGATIVE_INFINITY;
+            double log_C_alpha_miss = NEGATIVE_INFINITY;
             if (alphabet_size > 2) {
                 // compute log_C_zero_alpha
                 for (size_t j = 0; j < alphabet_size - 2; j++) {
@@ -573,7 +575,7 @@ em_results laml_expectation_maximization(
     std::vector<double> params(t.num_nodes + 3);
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
     app->Options()->SetIntegerValue("print_level", 0);
-    app->Options()->SetNumericValue("tol", 1e-3);
+    app->Options()->SetNumericValue("tol", 1e-5);
     app->Options()->SetStringValue("jac_c_constant", "yes");
     app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     // app->Options()->SetStringValue("derivative_test", "second-order");
@@ -645,9 +647,9 @@ em_results laml_expectation_maximization(
             llh_after += likelihood[character];
         }
         
-        const double tolerance = 1e-5;
-        if (llh_after < llh_before - tolerance && (!model.ultrametric || i != 0)) {
-            spdlog::error("LLH before: {}, LLH after: {}", llh_before, llh_after);
+        const double tolerance = 1e-6;
+        if ((llh_after - llh_before) / abs(llh_before) < -tolerance && (!model.ultrametric || i != 0)) {
+            spdlog::error("LLH before: {}, LLH after: {}, {}", llh_before, llh_after, (llh_after - llh_before) / abs(llh_before));
             throw std::runtime_error("LLH decreased significantly in M-step.");
         }
 
