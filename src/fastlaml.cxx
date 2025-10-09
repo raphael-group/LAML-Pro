@@ -266,7 +266,7 @@ hill_climbing_result simulated_annealing(
 
             spdlog::info(
                 "Iteration {}: Applied NNI move ({}, {}), no. accepts: {}, new log likelihood: {}, current phi: {}, current nu: {}",
-                iteration, sampled_move.u, sampled_move.v, no_accepts, current_log_likelihood, model.parameters[0], model.parameters[1]
+                iteration, sampled_move.u, sampled_move.v, no_accepts, current_log_likelihood, model.parameters[1], model.parameters[0]
             ); 
         } else {
             spdlog::info(
