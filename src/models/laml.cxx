@@ -2,6 +2,7 @@
 #include <limits>
 #include "models/laml.h"
 #include "math_utilities.h"
+#include "constants.h"
 
 #include <cassert>
 
@@ -10,8 +11,6 @@
 #include <numeric>
 #include <cmath>
 #include <spdlog/spdlog.h>
-
-#define NEGATIVE_INFINITY (-1e7) //-std::numeric_limits<double>::infinity())
 
 void laml_model::compute_log_pmatrix_vector_product(
     laml_data& d,

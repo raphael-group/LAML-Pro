@@ -1,4 +1,6 @@
 #include "io.h"
+#include "constants.h"
+
 #include <variant>
 
 #include <iostream>
@@ -8,7 +10,6 @@
 #include "csv.hpp"
 #include "extern/compact_tree.h"
 
-#define NEGATIVE_INFINITY (-1e7)
 /*!
 * @brief Parse a Newick tree file into a Tree struct.
 * @param fname The path to the Newick tree file.
