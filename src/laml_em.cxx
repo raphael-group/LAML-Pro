@@ -138,30 +138,119 @@ double m_step_obj_and_grad(const double* parameters, double* gradient, const e_s
     return -result;
 }
 
-static inline double hess_nu_nu(const std::array<double,6>& resp, double blen, double nu) {
-    double denom = std::exp(blen * nu) - 1.0;
-    double inv = 1.0 / (denom * denom);
-    return (resp[2]+resp[4]) * std::exp(blen*nu) * blen * blen * inv;
+static inline double log_expm1(double x) {
+    if (std::abs(x) < 1e-6) {
+        double ax = std::abs(x);
+        return std::log(ax + 0.5*ax*ax);
+    }
+    return std::log(std::abs(std::expm1(x)));
 }
 
-static inline double hess_nu_blen(const std::array<double,6>& resp, double blen, double nu)
-{
-    const double denom  = std::exp(nu * blen) - 1.0;
-    const double inv  = 1.0 / denom;
+struct SignedLog {
+    double logabs;
+    int    sign;
+};
 
-    double H = -(resp[0] + resp[1] + resp[3]);
-    H += (resp[2] + resp[4]) * (1 - nu * blen) * inv;
-    H += (resp[2] + resp[4]) * (- nu * blen) * (1 - nu * blen) * inv * inv;
-    return H;
+static inline SignedLog slog_add(SignedLog a, SignedLog b) {
+    if (a.sign == 0) return b;
+    if (b.sign == 0) return a;
+
+    if (b.logabs > a.logabs) std::swap(a, b);
+
+    const double r = std::exp(b.logabs - a.logabs);
+
+    SignedLog out;
+    if (a.sign == b.sign) {
+        out.sign   = a.sign;
+        out.logabs = a.logabs + std::log1p(r);
+    } else {
+        if (r == 1.0) {
+            out.sign = 0;
+            out.logabs = NEGATIVE_INFINITY;
+        } else {
+            out.sign   = a.sign;
+            out.logabs = a.logabs + std::log1p(-r);
+        }
+    }
+    return out;
 }
 
-static inline double hess_blen_blen(const std::array<double,6>& resp, double blen, double nu)
+static inline SignedLog make_slog_from_real(double v) {
+    SignedLog s;
+    if (v == 0.0) { s.sign = 0; s.logabs = NEGATIVE_INFINITY; }
+    else { s.sign = (v > 0.0) ? +1 : -1; s.logabs = std::log(std::abs(v)); }
+    return s;
+}
+
+static inline SignedLog make_slog_signed(double logabs, int sign) {
+    SignedLog s;
+    s.logabs = logabs;
+    s.sign   = sign;
+    return s;
+}
+
+static inline double hess_nu_nu(const std::array<double,6>& resp,
+                                double blen, double nu)
 {
-    const double denom1  = std::exp(blen) - 1.0;
-    const double inv1  = 1.0 / (denom1 * denom1);
-    const double denom2  = std::exp(nu * blen) - 1.0;
-    const double inv2  = 1.0 / (denom2 * denom2);
-    return std::exp(blen) * resp[1] * inv1 + std::exp(nu*blen)*nu*nu*(resp[2]+resp[4]) * inv2;
+    const double x = blen * nu;
+    const double log_num   = std::log(resp[2] + resp[4]) + x + 2.0*std::log(blen);
+    const double log_denom = 2.0 * log_expm1(x);
+    return std::exp(log_num - log_denom);
+}
+
+static inline double hess_nu_blen(const std::array<double,6>& resp,
+                                  double blen, double nu)
+{
+    const double x      = nu * blen;
+    const double R      = (resp[2] + resp[4]);
+    const double S013   = (resp[0] + resp[1] + resp[3]);
+
+    SignedLog A = make_slog_from_real(-S013);
+
+    const double Ld   = log_expm1(x);    // log|exp(x)-1|
+    const int    sd   = (std::expm1(x) > 0.0 ? +1 : (std::expm1(x) < 0.0 ? -1 : 0)); // sign of denom
+
+    const double one_minus_x = 1.0 - x;
+    const int sR  = (R > 0.0 ? +1 : (R < 0.0 ? -1 : 0));
+    const int s1mx= (one_minus_x > 0.0 ? +1 : (one_minus_x < 0.0 ? -1 : 0));
+    const int sx  = (x > 0.0 ? +1 : (x < 0.0 ? -1 : 0));
+
+    SignedLog B;
+    if (sR == 0 || s1mx == 0 || sd == 0) {
+        B.sign = 0; B.logabs = NEGATIVE_INFINITY;
+    } else {
+        const double logabsB = std::log(std::abs(R)) + std::log(std::abs(one_minus_x)) - Ld;
+        const int signB = sR * s1mx * sd;
+        B = make_slog_signed(logabsB, signB);
+    }
+
+    SignedLog C;
+    if (sR == 0 || s1mx == 0 || sx == 0) {
+        C.sign = 0; C.logabs = NEGATIVE_INFINITY;
+    } else {
+        const double logabsC = std::log(std::abs(R)) + std::log(std::abs(x))
+                             + std::log(std::abs(one_minus_x)) - 2.0*Ld;
+        const int signC = sR * (-sx) * s1mx;
+        C = make_slog_signed(logabsC, signC);
+    }
+
+    SignedLog S = slog_add(A, B);
+    S = slog_add(S, C);
+    if (S.sign == 0) return 0.0;
+    return (S.sign > 0 ? +1.0 : -1.0) * std::exp(S.logabs);
+}
+
+static inline double hess_blen_blen(const std::array<double,6>& resp,
+                                    double blen, double nu)
+{
+    const double ln_resp1  = std::log(resp[1]);
+    const double ln_resp24 = std::log(resp[2] + resp[4]);
+
+    const double lt1 = blen + ln_resp1  - 2.0*log_expm1(blen);
+    const double lt2 = nu*blen + std::log(nu*nu) + ln_resp24 - 2.0*log_expm1(nu*blen);
+
+    const double m = std::max(lt1, lt2);
+    return std::exp(m) * (std::exp(lt1 - m) + std::exp(lt2 - m));
 }
 
 class MStepProblem : public TNLP {
@@ -466,9 +555,9 @@ void laml_expectation_step(
             double log_C_miss_miss = outside_ll(character, u, 0) + edge_inside_ll(character, w, 0) 
                                    + inside_ll(character, v, 0) - likelihoods[character];
 
-            double log_C_zero_alpha = NEGATIVE_INFINITY;
+            double log_C_zero_alpha  = NEGATIVE_INFINITY;
             double log_C_alpha_alpha = NEGATIVE_INFINITY;
-            double log_C_alpha_miss = NEGATIVE_INFINITY;
+            double log_C_alpha_miss  = NEGATIVE_INFINITY;
             if (alphabet_size > 2) {
                 // compute log_C_zero_alpha
                 for (size_t j = 0; j < alphabet_size - 2; j++) {
@@ -574,6 +663,8 @@ em_results laml_expectation_maximization(
     app->Options()->SetNumericValue("tol", 1e-5);
     app->Options()->SetStringValue("jac_c_constant", "yes");
     app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
+    app->Options()->SetIntegerValue("max_iter", 10000);
+    //app->Options()->SetStringValue("hessian_approximation", "limited-memory");
     //app->Options()->SetStringValue("derivative_test", "second-order");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
     // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
