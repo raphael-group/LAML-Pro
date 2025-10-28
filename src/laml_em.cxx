@@ -260,11 +260,12 @@ class MStepProblem : public TNLP {
     std::vector<double> init;
     std::vector<double> solution;
     bool ultrametric;
+    double min_branch_length;
     std::vector<std::vector<int>> paths;
 
     public:
-    MStepProblem(e_step_data data, tree t, std::vector<double> init, bool ultrametric = true) 
-    : data(data), t(t), init(init), ultrametric(ultrametric)
+    MStepProblem(e_step_data data, tree t, std::vector<double> init, bool ultrametric = true, double min_branch_length_frac = 0.01) 
+    : data(data), t(t), init(init), ultrametric(ultrametric), min_branch_length(min_branch_length_frac)
     { 
         if (ultrametric) paths = root_to_leaf_paths(t);
     }
@@ -278,9 +279,15 @@ class MStepProblem : public TNLP {
     )
     {
         n = t.num_nodes + 3;
-        m = ultrametric ? paths.size() : 0;
+        m = 0;
         nnz_jac_g = 0;
-        for(auto p : paths) nnz_jac_g += p.size() + 1;
+
+        if (ultrametric) {
+            m = paths.size() + t.num_nodes;
+            nnz_jac_g = 2 * t.num_nodes;
+            for(auto p : paths) nnz_jac_g += p.size() + 1;
+        }
+
         nnz_h_lag = 2 * t.num_nodes + 2;
         index_style = TNLP::C_STYLE;
         return true;
@@ -303,9 +310,16 @@ class MStepProblem : public TNLP {
         x_l[0] = NU_LB;
         x_l[1] = PHI_LB;
 
-        for (size_t i=0; i < paths.size(); i++) {
-            g_l[i] = 0.0;
-            g_u[i] = 0.0;
+        if (ultrametric) {
+            for (size_t i=0; i < paths.size(); i++) {
+                g_l[i] = 0.0;
+                g_u[i] = 0.0;
+            }
+
+            for (int i=paths.size(); i < m; i++) {
+                g_l[i] = 0.0;
+                g_u[i] = 1e10;
+            }
         }
 
         x_u[0] = NU_UB;  // set nu \in [0, 100]
@@ -415,7 +429,9 @@ class MStepProblem : public TNLP {
       Index         m,
       Number*       g
     ) {
-        for (int i = 0; i < m; i++) g[i] = m_step_ultrametric_constraint(n, x, paths[i]);
+        if (!ultrametric) return true;
+        for (size_t i = 0; i < paths.size(); i++) g[i] = m_step_ultrametric_constraint(n, x, paths[i]);
+        for (int i = paths.size(); i < m; i++) g[i] = x[i - paths.size() + 2] - min_branch_length * x[n - 1];
         return true;
     }
 
@@ -429,9 +445,11 @@ class MStepProblem : public TNLP {
       Index*        jCol,
       Number*       values
     ) {
-        if (!values && ultrametric) {
+        if (!ultrametric) return true;
+
+        if (!values) {
             int k = 0;
-            for(int i = 0; i < m; i++) {
+            for(size_t i = 0; i < paths.size(); i++) {
                 for (auto node : paths[i]) {
                     iRow[k] = i;
                     jCol[k] = node + 2;
@@ -442,11 +460,22 @@ class MStepProblem : public TNLP {
                 jCol[k] = n - 1;
                 k++;
             }
+
+            for(int i = paths.size(); i < m; i++) {
+                iRow[k] = i;
+                jCol[k] = i - paths.size() + 2;
+                k++;
+
+                iRow[k] = i;
+                jCol[k] = n - 1;
+                k++;
+            }
+
             return true;
         }
 
         int k = 0;
-        for (int i = 0; i < m; i++) {
+        for (size_t i = 0; i < paths.size(); i++) {
             for (auto node : paths[i]) {
                 (void) node;
                 values[k] = 1.0;
@@ -454,6 +483,13 @@ class MStepProblem : public TNLP {
             }
 
             values[k] = -1.0;
+            k++;
+        }
+
+        for(int i = paths.size(); i < m; i++) {
+            values[k] = 1.0;
+            k++;
+            values[k] = -min_branch_length;
             k++;
         }
 
@@ -660,12 +696,12 @@ em_results laml_expectation_maximization(
     std::vector<double> params(t.num_nodes + 3);
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
     app->Options()->SetIntegerValue("print_level", 0);
-    app->Options()->SetNumericValue("tol", 1e-5);
+    app->Options()->SetNumericValue("tol", 1e-4);
     app->Options()->SetStringValue("jac_c_constant", "yes");
     app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     app->Options()->SetIntegerValue("max_iter", 10000);
-    //app->Options()->SetStringValue("hessian_approximation", "limited-memory");
-    //app->Options()->SetStringValue("derivative_test", "second-order");
+    // app->Options()->SetStringValue("hessian_approximation", "limited-memory");
+    // app->Options()->SetStringValue("derivative_test", "first-order");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
     // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
 
@@ -711,7 +747,7 @@ em_results laml_expectation_maximization(
 
         {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
-            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric);
+            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric, model.min_branch_length);
             ApplicationReturnStatus status = app->OptimizeTNLP(prob);
             if (status != Solve_Succeeded) {
                 throw std::runtime_error("Solver failed.");

@@ -149,7 +149,7 @@ void write_results(
 
 void optimize_parameters(
     tree& t, const phylogeny_data& data, unsigned int seed, 
-    std::string output_prefix, bool is_ultrametric
+    std::string output_prefix, bool is_ultrametric, double min_branch_length
 ) {
     spdlog::info("Optimizing model parameters and branch lengths...");
 
@@ -173,7 +173,11 @@ void optimize_parameters(
         }
     }
 
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric);
+    laml_model model(
+        data.character_matrix, data.observation_matrix, data.mutation_priors, 
+        initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length
+    );
+
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     auto end = std::chrono::high_resolution_clock::now();
@@ -202,6 +206,7 @@ hill_climbing_result simulated_annealing(
     unsigned int max_iterations,
     unsigned int num_threads,
     bool is_ultrametric,
+    double min_branch_length,
     double T0 = 0.1
 ) {    
     // Initialize simulated annealing parameters, inheriting from LAML
@@ -212,7 +217,7 @@ hill_climbing_result simulated_annealing(
     const double eta = 1e-8; // minimum improvement
 
     tree current_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, is_ultrametric);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length);
     auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
     double current_log_likelihood = initial_result.log_likelihood;
     
@@ -288,7 +293,6 @@ hill_climbing_result simulated_annealing(
         log_likelihoods.push_back(current_log_likelihood);
         iteration++; // advance iterations only after successful moves
         if (move_accepted) {
-
             no_accepts++;
 
             if (std::abs(delta) < eta) {
@@ -319,7 +323,7 @@ hill_climbing_result simulated_annealing(
 void search_optimal_tree(
     tree& t, const phylogeny_data& data, unsigned int seed, 
     unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp,
-    bool is_ultrametric
+    bool is_ultrametric, double min_branch_length
 ) {
     spdlog::info("Searching for optimal tree...");
 
@@ -333,12 +337,12 @@ void search_optimal_tree(
     double initial_nu = dist(gen);
 
     // perform hill climbing
-    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, is_ultrametric, temp);
+    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, is_ultrametric, min_branch_length, temp);
     t = result.best_tree;
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
@@ -448,6 +452,11 @@ int main(int argc, char** argv) {
         .default_value(0.1)
         .scan<'g', double>();
 
+    program.add_argument("--min-branch-length")
+        .help("Minimum branch length relative to scaled tree with unit height")
+        .default_value(0.01)
+        .scan<'g', double>();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -512,7 +521,12 @@ int main(int argc, char** argv) {
     std::string mode = program.get<std::string>("--mode");
     
     if (mode == "optimize") {
-        optimize_parameters(t, data, seed, program.get<std::string>("--output"), program.get<bool>("--ultrametric"));
+        optimize_parameters(
+            t, data, seed, 
+            program.get<std::string>("--output"), 
+            program.get<bool>("--ultrametric"),
+            program.get<double>("--min-branch-length")
+        );
     } else {
         search_optimal_tree(
             t, data, seed, 
@@ -520,7 +534,8 @@ int main(int argc, char** argv) {
             program.get<std::string>("--output"),
             program.get<unsigned int>("--max-iterations"),
             program.get<double>("--temp"),
-            program.get<bool>("--ultrametric")
+            program.get<bool>("--ultrametric"),
+            program.get<double>("--min-branch-length")
         );
     }
 

@@ -33,6 +33,7 @@ class laml_model : public phylogenetic_model<laml_data> {
     std::vector<std::vector<double>> log_mutation_priors; // [character][state]   
     std::string data_type; // change
     bool ultrametric;
+    double min_branch_length;
 
     laml_model(
         const std::vector<std::vector<int>>& character_matrix,
@@ -42,8 +43,9 @@ class laml_model : public phylogenetic_model<laml_data> {
         double phi,
         const std::string data_type,
         bool ultrametric = false,
+        double min_branch_length = 0.01,
         double timescale = 1.0
-    ) : character_matrix(character_matrix), observation_matrix(observation_matrix), mutation_priors(mutation_priors), data_type(data_type), ultrametric(ultrametric) {
+    ) : character_matrix(character_matrix), observation_matrix(observation_matrix), mutation_priors(mutation_priors), data_type(data_type), ultrametric(ultrametric), min_branch_length(min_branch_length) {
         parameters = {nu, phi, timescale}; // nu, phi
         if (data_type == "character-matrix") {
             alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
