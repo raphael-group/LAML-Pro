@@ -243,14 +243,18 @@ static inline double hess_nu_blen(const std::array<double,6>& resp,
 static inline double hess_blen_blen(const std::array<double,6>& resp,
                                     double blen, double nu)
 {
-    const double ln_resp1  = std::log(resp[1]);
-    const double ln_resp24 = std::log(resp[2] + resp[4]);
+    const double ln_resp1  = std::log(std::max(resp[1], 1e-18));
+    const double ln_resp24 = std::log(std::max(resp[2] + resp[4], 1e-18));
 
     const double lt1 = blen + ln_resp1  - 2.0*log_expm1(blen);
     const double lt2 = nu*blen + std::log(nu*nu) + ln_resp24 - 2.0*log_expm1(nu*blen);
 
-    const double m = std::max(lt1, lt2);
-    return std::exp(m) * (std::exp(lt1 - m) + std::exp(lt2 - m));
+    const double m  = std::max(lt1, lt2);
+    const double s  = std::exp(lt1 - m) + std::exp(lt2 - m);
+    double out_log  = m + std::log(s);
+    if (out_log > 700.0) out_log = 700.0;
+    if (out_log < -700.0) out_log = -700.0;
+    return std::exp(out_log);
 }
 
 class MStepProblem : public TNLP {
@@ -408,8 +412,10 @@ class MStepProblem : public TNLP {
         }
 
         {
-            double inv1 = 1.0 / (1.0 - phi);
-            double inv2 = 1.0 / phi;
+            const double eps_phi = 1e-12;
+            const double phi_safe = std::min(std::max(phi, eps_phi), 1.0 - eps_phi);
+            double inv1 = 1.0 / (1.0 - phi_safe);
+            double inv2 = 1.0 / phi_safe;
             h_phi_phi = data.num_not_missing * inv1*inv1
                     + (data.num_missing - data.leaf_responsibility) * inv2*inv2;
         }
@@ -701,7 +707,6 @@ em_results laml_expectation_maximization(
     app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
     app->Options()->SetIntegerValue("max_iter", 10000);
     // app->Options()->SetStringValue("hessian_approximation", "limited-memory");
-    // app->Options()->SetStringValue("derivative_test", "first-order");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
     // app->Options()->SetStringValue("check_derivatives_for_naninf", "yes");
 
