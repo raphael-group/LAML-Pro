@@ -2,6 +2,7 @@ import dendropy
 import dendropy.calculate.phylogeneticdistance as phylodist
 import numpy as np
 import sys
+import scipy.stats as stats
 
 def compute_rfs(reference_fname, tree_fnames):
     """
@@ -71,7 +72,10 @@ def compute_distance_matrix(tree_fname):
 
     distance_vec = []
     for t1, t2 in M.distinct_taxon_pair_iter():
-        distance_vec.append((t1.label, t2.label, M.distance(t1, t2)))
+        if t1.label < t2.label:
+            distance_vec.append((t1.label, t2.label, M.distance(t1, t2)))
+        else:
+            distance_vec.append((t2.label, t1.label, M.distance(t1, t2)))
     sorted_distance_vec = sorted(distance_vec)
     sorted_distance_vec = np.array([x[2] for x in sorted_distance_vec])
     return sorted_distance_vec
@@ -83,12 +87,12 @@ def compute_branch_length_distances(reference_fname, tree_fnames):
         inferred_dists = compute_distance_matrix(tree_path)
         scale_factor = (inferred_dists.T @ inferred_dists) / (inferred_dists.T @ true_dists)
         dist = np.linalg.norm(true_dists * scale_factor - inferred_dists)
-
+        res = stats.linregress(inferred_dists / inferred_dists.max(), true_dists / true_dists.max())
         results.append({
             'tree': tree_path,
-            'distance': dist
+            'distance': dist,
+            'r2': res.rvalue,
         })
-
     return results
 
 def main():
