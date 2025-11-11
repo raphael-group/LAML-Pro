@@ -123,9 +123,9 @@ def main():
 
     if args.metric == 'branch_length_distances':
         res = compute_branch_length_distances(args.reference, args.trees)
-        print(f"{'Tree':<50} {'Distance':>10}")
+        print(f"{'Tree':<50} {'Distance':>10} {'R Squared':>10}")
         for r in res:
-            print(f"{r['tree']:<50} {r['distance']:10.6f}")
+            print(f"{r['tree']:<50} {r['distance']:10.6f} {r['r2']**2:10.6f}")
         return
     else:
         results = compute_rfs(args.reference, args.trees)

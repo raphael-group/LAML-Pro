@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import argparse
 import os
 import pandas as pd
@@ -20,7 +21,7 @@ def weighted_hamming(a, b):
     return s
 
 def build_tree(df, metric):
-    names = df.index.tolist()
+    names = df.index.astype(str).tolist()
     data = df.values
     n = len(names)
     mat = [[0.0 if i == j else float(metric(data[i], data[j])) for j in range(i + 1)] for i in range(n)]
