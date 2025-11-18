@@ -1,4 +1,4 @@
-#!/n/fs/ragr-data/users/schmidt/miniconda3/envs/breaked/envs/convexml-env/bin python
+#!/n/fs/ragr-data/users/schmidt/miniconda3/envs/breaked/envs/convexml-env/bin/python
 
 import argparse
 import os
