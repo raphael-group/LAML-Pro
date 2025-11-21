@@ -11,7 +11,7 @@ lineage tracing data. The method utilizes nearest-neighbor interchange (NNI) mov
 
 First, clone the repository with its submodules:
 ```
-$ git clone --recurse-submodules git@github.com:schmidt73/fast-laml.git
+$ git clone --recurse-submodules git@github.com:raphael-group/LAML-Pro.git
 ```
 
 Then build the project:
