@@ -40,12 +40,16 @@ binary to a directory listed in the `PATH` environmental variable.
 `lamlpro` is a command-line tool to infer a cell lineage tree $\mathcal{T}$
 on $n$ cells from a set of observations $X$ at the $n$ cells. The tool
 currently supports two types of observated data:
-* The observed data $X$ is an $n$-by-$m$ character matrix specifying the character-states of each of $n$ cells at $m$ characters. 
+* The observed data $X$ is an $n$-by-$m$ character matrix specifying the 
+character-states of each of $n$ cells at $m$ characters. 
 * The observed data $X$ is Gillian fill in details please...
+
 `lamlpro` requires an initial cell lineage tree $\mathcal{T}_0$ as input
 to the algorithm and provides two modes:
+
 * mode: `optimize` finds the optimal branch lengths $\delta_e$ and model parameter $\Theta$ for $\mathcal{T}_0$ under the PMMO model.
 * mode: `search` finds the most likely tree $\mathcal{T}^*$, branch lengths $\delta_e$ and model parameters $\Theta$ under the PMMO model.
+
 If you are interested in inferring a tree from scratch, we recommend using the `search` mode of
 `lamlpro`. If you are interested fitting branch lengths to a tree we recommend using the `optimize` mode
 of `lamlpro`. In either case, one is required to specify both the observations $X$ and initial tree
