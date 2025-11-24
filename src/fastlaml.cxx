@@ -370,12 +370,12 @@ void search_optimal_tree(
 }
 
 int main(int argc, char** argv) {
-    auto console_logger = spdlog::stdout_color_mt("fastlaml");
+    auto console_logger = spdlog::stdout_color_mt("lamlpro");
     auto error_logger = spdlog::stderr_color_mt("error");
     spdlog::set_default_logger(console_logger);
 
     argparse::ArgumentParser program(
-        "fastlaml",
+        "lamlpro",
         std::to_string(FASTLAML_VERSION_MAJOR) + "." + std::to_string(FASTLAML_VERSION_MINOR),
         argparse::default_arguments::help
     );
@@ -388,7 +388,7 @@ int main(int argc, char** argv) {
 
     program.add_argument("--version")
         .action([&](const auto & /*unused*/) {
-            std::cout << "fastppm version " << FASTLAML_VERSION_MAJOR << "." << FASTLAML_VERSION_MINOR << std::endl;
+            std::cout << "lamlpro version " << FASTLAML_VERSION_MAJOR << "." << FASTLAML_VERSION_MINOR << std::endl;
             std::exit(0);
         })
         .default_value(false)
@@ -397,33 +397,33 @@ int main(int argc, char** argv) {
         .nargs(0);
 
     program.add_argument("-m", "--mutation-priors")
-        .help("Path to the mutation priors file")
+        .help("path to the mutation priors file (CSV)")
         .default_value(std::string(""));
 
     program.add_argument("-c", "--matrix")
-        .help("Path to the matrix file (CSV)")
+        .help("path to the observed data file (CSV)")
         .required();
 
     program.add_argument("-d", "--data-type")
-        .help("String. Options are 'character-matrix' or 'observation-matrix'.")
+        .help("options are 'character-matrix' or 'observation-matrix'.")
         .nargs(1)
         .default_value(std::string("character-matrix")); 
 
     program.add_argument("-t", "--tree")
-        .help("Path to the tree file")
+        .help("path to the rooted binary tree (newick)")
         .required();
 
     program.add_argument("-o", "--output")
-        .help("Path to the output file")
+        .help("prefix for output files")
         .required();
     
     program.add_argument("-v", "--verbose")
-        .help("Additionally save all console logs to a file automatically.")
+        .help("save all console logs to a file automatically.")
         .default_value(false)
         .implicit_value(true);
 
     program.add_argument("-u", "--ultrametric")
-        .help("Enforce ultrametric constraint during optimization.")
+        .help("enforce ultrametric constraint during optimization.")
         .default_value(false)
         .implicit_value(true);
 
@@ -433,27 +433,27 @@ int main(int argc, char** argv) {
         .scan<'u', unsigned int>();
 
     program.add_argument("--mode")
-        .help("Operation mode: 'optimize' for parameter optimization or 'search' for tree search")
+        .help("'optimize' for parameter optimization or 'search' for tree search")
         .default_value(std::string("optimize"))
         .choices("optimize", "search");
 
     program.add_argument("--seed")
-        .help("Random seed for reproducibility")
+        .help("random seed for reproducibility")
         .default_value(73U)
         .scan<'u', unsigned int>();
 
     program.add_argument("--max-iterations")
-        .help("Maximum number of iterations for hill climbing")
+        .help("maximum number of iterations for hill climbing")
         .default_value(20000U)
         .scan<'u', unsigned int>();
 
     program.add_argument("--temp")
-        .help("Starting temperature for topology search")
+        .help("starting temperature for topology search")
         .default_value(0.1)
         .scan<'g', double>();
 
     program.add_argument("--min-branch-length")
-        .help("Minimum branch length relative to scaled tree with unit height")
+        .help("minimum branch length relative to scaled tree with unit height")
         .default_value(0.01)
         .scan<'g', double>();
 
@@ -470,7 +470,7 @@ int main(int argc, char** argv) {
         console_sink->set_level(spdlog::level::info);
 
         // Create file sink
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(program.get<std::string>("--output") + "_fastlaml.log", true);
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(program.get<std::string>("--output") + "_lamlpro.log", true);
         file_sink->set_level(spdlog::level::info); // debug); // Log everything to file
 
         // Combine them into a multi-sink logger

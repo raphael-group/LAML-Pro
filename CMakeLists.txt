@@ -11,15 +11,15 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS_DEBUG "-g --coverage")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -funsafe-math-optimizations -march=native")
 
-project(fastlaml VERSION 1.0)
+project(lamlpro VERSION 1.0)
 
 add_subdirectory(src/)
 add_subdirectory(tests/)
 
-target_include_directories(fastlaml PUBLIC "${fastlaml_SOURCE_DIR}/include")
-target_include_directories(fastlaml PUBLIC "${fastlaml_SOURCE_DIR}/third-party/csv-parser/include")
-target_include_directories(fastlaml_tests PUBLIC "${fastlaml_SOURCE_DIR}/include")
-target_include_directories(fastlaml_tests PUBLIC "${fastlaml_SOURCE_DIR}/include")
+target_include_directories(lamlpro PUBLIC "${lamlpro_SOURCE_DIR}/include")
+target_include_directories(lamlpro PUBLIC "${lamlpro_SOURCE_DIR}/third-party/csv-parser/include")
+target_include_directories(lamlpro_tests PUBLIC "${lamlpro_SOURCE_DIR}/include")
+target_include_directories(lamlpro_tests PUBLIC "${lamlpro_SOURCE_DIR}/include")
 
 # turn off JSON library tests
 set(JSON_BuildTests OFF CACHE INTERNAL "")

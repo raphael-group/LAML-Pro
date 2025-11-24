@@ -1,123 +1,130 @@
-# fastLAML: Fast Likelihood Approximation for Maximum Likelihood Phylogeny Inference
+# laml-pro: joint maximum likelihood estimation of cell genotypes and cell lineage trees
 
-*fastLAML* is a method for inferring lineage trees from dynamic (e.g. CRISPR-Cas9) 
-lineage tracing data. The method utilizes nearest-neighbor interchange (NNI) moves to explore the tree space and find the maximum likelihood phylogeny under the PMM model.
+`lamlpro` is a maximum likelihood cell lineage tree inference algorithm
+based on the under the Probabilistic Mixed-type Missing Observation (PMMO) 
+model. `lamlpro` has two modes and can _i)_ quickly infer branch lengths for a given cell
+lineage tree topology and _ii)_ find the most likely cell lineage tree using
+topology search.
+
+If you find `lamlpro` useful in your research, please cite the following paper:
+
+```
+```
 
 ## Installation
 
-#### Option 1: Build from source
+To build `lamlpro` manually requires only a modern C++20 compiler and CMake. 
+To install, simply clone the repository and compile the code using CMake, making
+sure to initialize all git submodules.
 
-`fastLAML` is implemented in C++ and requires a C++17 compliant compiler. The project uses CMake for building.
-
-First, clone the repository with its submodules:
-```
-$ git clone --recurse-submodules git@github.com:raphael-group/LAML-Pro.git
+```bash
+$ git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
 
-Then build the project:
-```
-$ mkdir build && cd build
+To build, run the following commands:
+
+```bash
+$ mkdir build
+$ cd build
 $ cmake ..
 $ make
+$ mv src/lamlpro lampro
 ```
 
-The executable will be available at fastlaml.
+The output files consist of the binary `lamlpro` which can be executed
+from the command line. For ease of use, we suggest adding the `lamlpro`
+binary to a directory listed in the `PATH` environmental variable.
 
 ## Usage
 
-To run *fastLAML*, execute the binary with the appropriate arguments:
+`lamlpro` is a command-line tool to infer a cell lineage tree $\mathcal{T}$
+on $n$ cells from a set of observations $X$ at the $n$ cells. The tool
+currently supports two types of observated data:
+* The observed data $X$ is an $n$-by-$m$ character matrix specifying the character-states of each of $n$ cells at $m$ characters. 
+* The observed data $X$ is Gillian fill in details please...
+`lamlpro` requires an initial cell lineage tree $\mathcal{T}_0$ as input
+to the algorithm and provides two modes:
+* mode: `optimize` finds the optimal branch lengths $\delta_e$ and model parameter $\Theta$ for $\mathcal{T}_0$ under the PMMO model.
+* mode: `search` finds the most likely tree $\mathcal{T}^*$, branch lengths $\delta_e$ and model parameters $\Theta$ under the PMMO model.
+If you are interested in inferring a tree from scratch, we recommend using the `search` mode of
+`lamlpro`. If you are interested fitting branch lengths to a tree we recommend using the `optimize` mode
+of `lamlpro`. In either case, one is required to specify both the observations $X$ and initial tree
+$\mathcal{T}_0$ via the command line flags `--tree` and `--matrix`.
 
+The tool has the following usage format:
 ```
-$ fastlaml [--mode MODE] -t TREE -c CHARACTER_MATRIX [-m MUTATION_PRIORS] -o OUTPUT [--threads N]
-```
+Usage: lamlpro [--help] [--version] [--mutation-priors VAR] --matrix VAR [--data-type VAR] --tree VAR --output VAR [--verbose] [--ultrametric] [--threads VAR] [--mode VAR] [--seed VAR] [--max-iterations VAR] [--temp VAR] [--min-branch-length VAR]
 
-### Modes
-
-*fastLAML* supports two primary modes:
-- `optimize`: Optimizes model parameters on a given tree
-- `search`: Searches for the optimal tree by exploring the tree space
-
-### Required Arguments
-
-- `-t, --tree`: Path to the Newick format tree file
-- `-c, --character-matrix`: Path to the character matrix file
-- `-o, --output`: Path for the output file
-
-### Optional Arguments
-
-- `-m, --mutation-priors`: Path to the mutation priors file
-- `--threads`: Number of threads to use (default: number of hardware threads)
-- `--mode`: Operating mode: "optimize" or "search" (default: "optimize")
-
-## Input Formats
-
-### Character Matrix
-
-The character matrix should be provided as a CSV file where:
-- The first row contains character names (optional)
-- The first column contains taxon names
-- Each cell contains a character state (integer)
-- Missing data is represented by "?" or empty cells
-
-Example:
-```
-Taxa,Char1,Char2,Char3
-TaxonA,1,2,0
-TaxonB,1,2,?
-TaxonC,0,1,1
+Optional arguments:
+  -h, --help             shows help message and exits
+  --version              prints version information and exits
+  -m, --mutation-priors  path to the mutation priors file (CSV) [nargs=0..1] [default: ""]
+  -c, --matrix           path to the observed data file (CSV) [required]
+  -d, --data-type        options are 'character-matrix' or 'observation-matrix'. [nargs=0..1] [default: "character-matrix"]
+  -t, --tree             path to the rooted binary tree (newick) [required]
+  -o, --output           prefix for output files [required]
+  -v, --verbose          save all console logs to a file automatically.
+  -u, --ultrametric      enforce ultrametric constraint during optimization.
+  --threads              number of threads to use [nargs=0..1] [default: 10]
+  --mode                 'optimize' for parameter optimization or 'search' for tree search [nargs=0..1] [default: "optimize"]
+  --seed                 random seed for reproducibility [nargs=0..1] [default: 73]
+  --max-iterations       maximum number of iterations for hill climbing [nargs=0..1] [default: 20000]
+  --temp                 starting temperature for topology search [nargs=0..1] [default: 0.1]
+  --min-branch-length    minimum branch length relative to scaled tree with unit height [nargs=0..1] [default: 0.01]
 ```
 
-### Mutation Priors
+There are two main output files of `lamlpro`:
+* 
+* 
 
-Mutation priors are specified as a CSV file with the format:
-```
-character_index,state,probability
-```
+> [!TIP]
+> Use the flag `--ultrametric` to ensure the cell lineage tree has equal
+> length root-to-leaf paths.
 
-Example:
-```
-0,1,0.6
-0,2,0.4
-1,1,0.3
-1,2,0.7
-```
+## Examples
 
-If not provided, uniform priors will be used.
+We provide simulated cell lineage trees with $n = 100, 250, 500$ nodes
+and simulated observations in order to demonstrate `lamlpro`.
 
-### Tree Format
+### Example 1: Character Matrix
 
-Trees should be provided in Newick format. For example:
+To apply `lamlpro` to character matrix data, we first infer a cell lineage tree
+$\mathcal{T}_0$ with $n = 250$ cells using the Neighbor Joining (NJ) algorithm. 
+The initial
+tree can be inferred using any method, but for the sake of the example,
+we use the following command:
 ```
-((A:0.1,B:0.2):0.3,(C:0.4,D:0.5):0.6);
+$ python scripts/neighbor_joining.py examples/n250_m30_character_matrix/character_matrix.csv examples/n250_m30_character_matrix/initial
 ```
-
-## Example
-
-To optimize parameters on a given tree:
+This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
+`examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
+distance from the inferred and true trees, we see that both are quite far away from
+the ground truth:
 ```
-$ fastlaml --mode optimize -t example.tree -c example_matrix.csv -o results
-```
-
-To search for the optimal tree:
-```
-$ fastlaml --mode search -t initial_tree.tree -c example_matrix.csv -m priors.csv -o results --threads 4
+$ python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk
+Tree                                  RF Distance         Normalized RF
+initial_hamming_tree.nwk              404                 0.817814
+initial_weighted_hamming_tree.nwk     356                 0.720648
 ```
 
-## Technical Details
+With either initial tree, one can run `lamlpro` with the following command:
+```
+$ lamlpro --matrix examples/n250_m30_character_matrix/character_matrix.csv --tree examples/n250_m30_character_matrix/tree.nwk -o examples/n250_m30_character_matrix/lamlpro --ultrametric --mode search --max-iterations 2500
+```
+The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
+iterations. For practical applications, we recommend setting this value higher and making
+sure that the algorithm converges. The preceding command results in two output files:
+`examples/n250_m30_character_matrix/lamlpro_tree.newick` and 
+`examples/n250_m30_character_matrix/lamlpro_results.json`.
+The first file is the inferred cell lineage tree with branch lengths and the second contains 
+parameter estimates and important metadata, such as the per-iteration log-likelihood.
 
-*fastLAML* implements a latent evolutionary model that:
-1. Accounts for missing data in the character matrix
-2. Uses expectation-maximization for parameter estimation
-3. Explores tree space using nearest-neighbor interchange (NNI) moves
-4. Parallelizes tree search for improved performance
-
-The implementation handles binary phylogenetic trees and automatically resolves polytomies when encountered in the input tree.
-
-## Performance
-
-The runtime of *fastLAML* scales with:
-- The number of characters in the matrix
-- The number of taxa in the tree
-- The number of NNI moves evaluated during tree search
-
-For typical datasets with hundreds of characters and dozens of taxa, analysis completes within minutes on standard hardware when using multiple threads.
+On this example, `lamlpro` should improve the tree topology and this can be verified by 
+running:
+```
+$ python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
+Tree                                  RF Distance         Normalized RF
+initial_hamming_tree.nwk              404                 0.817814
+initial_weighted_hamming_tree.nwk     356                 0.720648
+laml_pro_tree.newick                  140                 0.283401
+```
