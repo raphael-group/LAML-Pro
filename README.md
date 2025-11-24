@@ -40,7 +40,7 @@ binary to a directory listed in the `PATH` environmental variable.
 `lamlpro` is a command-line tool to infer a cell lineage tree $\mathcal{T}$
 on $n$ cells from a set of observations $X$ at the $n$ cells. The tool
 currently supports two types of observated data:
-* The observed data $X$ is an $n$-by-$m$ character matrix specifying the 
+* The observed data $X$ is an $n\text{-by-}m$ character matrix specifying the 
 character-states of each of $n$ cells at $m$ characters. 
 * The observed data $X$ is Gillian fill in details please...
 
