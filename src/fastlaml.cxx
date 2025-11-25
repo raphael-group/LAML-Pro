@@ -295,19 +295,20 @@ hill_climbing_result simulated_annealing(
         if (move_accepted) {
             no_accepts++;
 
-            if (std::abs(delta) < eta) {
-                ++no_improve_counter;
-                if (no_improve_counter >= max_no_improve) {
-                    spdlog::info("Terminating: {} small improvements below η = {}", max_no_improve, eta);
-                    break;
-                }
-            } else {
-                no_improve_counter = 0;  // reset if significant jump
-            }
+            //if (std::abs(delta) < eta) {
+            //   ++no_improve_counter;
+            //   if (no_improve_counter >= max_no_improve) {
+            //       spdlog::info("Terminating: {} small improvements below η = {}", max_no_improve, eta);
+            //       break;
+            //    }
+            //} else {
+            //  no_improve_counter = 0;  // reset if significant jump
+            //}
         } else {
             // No move accepted — check for early termination
-            if (neighborhood.empty() || std::abs(relative_improvement) < eta) {
-                spdlog::info("Terminating: no acceptable move or improvement < η at iteration {}", iteration);
+            if (neighborhood.empty()) { // || std::abs(relative_improvement) < eta) {
+                //spdlog::info("Terminating: no acceptable move or improvement < η at iteration {}", iteration);
+                spdlog::info("Terminating: no acceptable move at iteration {}", iteration);
                 break;
             }
         }

@@ -152,7 +152,7 @@ std::tuple<
 
         for (auto& row: reader) {
             std::string taxon_name = row["cell_name"].get<std::string>();
-            int cassette_idx = static_cast<int>(row["cassette_idx"].get<double>());
+            int cassette_idx = 0; // static_cast<int>(row["cassette_idx"].get<double>());
             int target_site = static_cast<int>(row["target_site"].get<double>());
             std::pair<int, int> character_key = {cassette_idx, target_site};
             character_key_set.insert(character_key);

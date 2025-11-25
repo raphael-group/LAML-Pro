@@ -11,6 +11,9 @@ If you find `lamlpro` useful in your research, please cite the following paper:
 ```
 ```
 
+If you are interested in reproducing the analyses in this paper, the reproducibility repository can be found at
+[LAML-Pro-experiments](https://github.com/raphael-group/LAML-Pro-experiments).
+
 ## Installation
 
 To build `lamlpro` manually requires only a modern C++20 compiler and CMake. 
@@ -20,6 +23,12 @@ sure to initialize all git submodules.
 ```bash
 $ git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
+Note that IPOPT is an external dependency and **is not provided as a submodule**.
+You must install IPOPT separately before running CMake. We recommend installing with the following command:
+```bash
+conda install -c conda-forge ipopt
+```
+or the equivalent using your system package manager. 
 
 To build, run the following commands:
 
@@ -28,7 +37,7 @@ $ mkdir build
 $ cd build
 $ cmake ..
 $ make
-$ mv src/lamlpro lampro
+$ mv src/lamlpro lamlpro
 ```
 
 The output files consist of the binary `lamlpro` which can be executed
@@ -42,7 +51,7 @@ on $n$ cells from a set of observations $X$ at the $n$ cells. The tool
 currently supports two types of observated data:
 * The observed data $X$ is an $n\text{-by-}m$ character matrix specifying the 
 character-states of each of $n$ cells at $m$ characters. 
-* The observed data $X$ is Gillian fill in details please...
+* The observed data $X$ is an $n\text{-by-}m+2$ matrix, where $n$ specifies the number of observations, $m$ is the number of edit states (including $0$), and $2$ corresponds to additional metadata columns. The columns should be `cell_name,target_site`, followed by columns corresponding to each state `state0_prob,state1_prob,state2_prob,state3_prob`. The state probability values should correspond to the generative probability (e.g. probability of hidden state $0$ having generated this observation), reported be in log space. They should be named with this convention, since we identify these columns as `state*_prob`.
 
 `lamlpro` requires an initial cell lineage tree $\mathcal{T}_0$ as input
 to the algorithm and provides two modes:
@@ -87,11 +96,62 @@ There are two main output files of `lamlpro`:
 
 ## Examples
 
-We provide simulated cell lineage trees with $n = 100, 250, 500$ nodes
+We provide simulated cell lineage trees with $n = 100, 250, 500$ nodes, $400$ characters,
 and simulated observations in order to demonstrate `lamlpro`.
 
-### Example 1: Character Matrix
+### Example 1: Observation Matrix
 
+To apply `lamlpro` to observation matrix data, we first infer a cell lineage tree
+$\mathcal{T}_0$ with $n = 100$ cells using the Neighbor Joining (NJ) algorithm. 
+The initial
+tree can be inferred using any method, but for the sake of the example,
+we use the following command:
+```
+$ python scripts/neighbor_joining.py examples/n100_m400_observation_matrix/argmax_character_matrix.csv examples/n100_m400_observation_matrix/initial
+```
+
+> [!TIP]
+> This script uses the neighbor joining implementation from biopython. You should install it with `conda install -c conda-forge biopython`. 
+
+This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
+`examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
+distance from the inferred and true trees, we see that both are quite far away from
+the ground truth:
+```
+$ python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk
+Tree                                  RF Distance         Normalized RF
+initial_hamming_tree.nwk              120                 0.618557
+initial_weighted_hamming_tree.nwk     130                 0.670103
+```
+
+With either initial tree, one can run `lamlpro` with the following command:
+```
+$ ./lamlpro --matrix examples/n100_m400_observation_matrix/observation_matrix.csv --tree examples/n100_m400_observation_matrix/initial_hamming_tree.nwk -o examples/n100_m400_observation_matrix/lamlpro --ultrametric --mode search --max-iterations 2500 --data-type "observation-matrix"
+```
+The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
+iterations. For practical applications, we recommend setting this value higher and making
+sure that the algorithm converges by checking that the log-likelihood improvements have plateaued (by looking at the `.json` output file). The preceding command results in four output files:
+`examples//n100_m400_observation_matrixlamlpro_tree.newick` and 
+`examples/n100_m400_observation_matrix/lamlpro_results.json` and
+`examples/n100_m400_observation_matrix/lamlpro_posterior_probs.csv` and
+`examples/n100_m400_observation_matrix/lamlpro_posterior_argmax.csv`.
+The first file is the inferred cell lineage tree with branch lengths (in mutation units) and the second contains 
+parameter estimates and important metadata, such as the per-iteration log-likelihood.
+The third file contains the probabilities over all states at each cell and site on the fixed maximum likelihood tree after convergence, and the fourth file contains the argmax *maximum a posteriori* (MAP) genotypes. 
+
+On this example, `lamlpro` should improve the tree topology and this can be verified by 
+running:
+```
+$ python scripts/metrics.py --reference examples/n100_m400_observation_matrix/tree.nwk --trees examples/n100_m400_observation_matrix/initial_hamming_tree.nwk examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk examples/n100_m400_observation_matrix/lamlpro_tree.newick
+Tree                                    RF Distance         Normalized RF
+initial_hamming_tree.nwk                120                 0.618557
+laml_pro_tree.hamming.newick            96                  0.494845
+initial_weighted_hamming_tree.nwk       130                 0.670103
+laml_pro_tree.weighted_hamming.newick   74                  0.381443
+laml_pro_tree.tree.newick               24                  0.123711
+```
+
+### Example 2: Character Matrix
 To apply `lamlpro` to character matrix data, we first infer a cell lineage tree
 $\mathcal{T}_0$ with $n = 250$ cells using the Neighbor Joining (NJ) algorithm. 
 The initial
@@ -100,6 +160,10 @@ we use the following command:
 ```
 $ python scripts/neighbor_joining.py examples/n250_m30_character_matrix/character_matrix.csv examples/n250_m30_character_matrix/initial
 ```
+
+> [!TIP]
+> This script uses the neighbor joining implementation from biopython. You should install it with `conda install -c conda-forge biopython`. 
+
 This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
 `examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
 distance from the inferred and true trees, we see that both are quite far away from
@@ -113,22 +177,25 @@ initial_weighted_hamming_tree.nwk     356                 0.720648
 
 With either initial tree, one can run `lamlpro` with the following command:
 ```
-$ lamlpro --matrix examples/n250_m30_character_matrix/character_matrix.csv --tree examples/n250_m30_character_matrix/tree.nwk -o examples/n250_m30_character_matrix/lamlpro --ultrametric --mode search --max-iterations 2500
+$ ./lamlpro --matrix examples/n250_m30_character_matrix/character_matrix.csv --tree examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk -o examples/n250_m30_character_matrix/lamlpro --ultrametric --mode search --max-iterations 2500
 ```
 The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
 iterations. For practical applications, we recommend setting this value higher and making
-sure that the algorithm converges. The preceding command results in two output files:
+sure that the algorithm converges by checking that the log-likelihood improvements have plateaued (by looking at the `.json` output file). The preceding command results in two output files:
 `examples/n250_m30_character_matrix/lamlpro_tree.newick` and 
 `examples/n250_m30_character_matrix/lamlpro_results.json`.
-The first file is the inferred cell lineage tree with branch lengths and the second contains 
+The first file is the inferred cell lineage tree with branch lengths (in mutation units) and the second contains 
 parameter estimates and important metadata, such as the per-iteration log-likelihood.
 
 On this example, `lamlpro` should improve the tree topology and this can be verified by 
 running:
 ```
-$ python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
-Tree                                  RF Distance         Normalized RF
-initial_hamming_tree.nwk              404                 0.817814
-initial_weighted_hamming_tree.nwk     356                 0.720648
-laml_pro_tree.newick                  140                 0.283401
+$ python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
+Tree                                     RF Distance    Normalized RF
+initial_hamming_tree.nwk                 404            0.817814
+lamlpro_tree.hamming.newick              316            0.753036
+initial_weighted_hamming_tree.nwk        356            0.720648
+lamlpro_tree.weighted_hamming.newick     316            0.639676
+lamlpro_tree.tree.newick                 136            0.275304
 ```
+
