@@ -24,19 +24,6 @@ sure to initialize all git submodules.
 git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
 
-We recommend installing all dependencies in a fresh conda environment:
-```
-conda create -n lamlpro-env -c conda-forge \
-    python=3.10 \
-    compilers \
-    pkg-config \
-    ipopt \
-    coin-or-osi \
-    eigen \
-    cmake \
-    ninja
-conda activate lamlpro-env
-```
 To ensure the packages can be found, you can run `export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"`.
 
 > [!TIP]
@@ -98,9 +85,7 @@ Optional arguments:
   --min-branch-length    minimum branch length relative to scaled tree with unit height [nargs=0..1] [default: 0.01]
 ```
 
-There are two main output files of `lamlpro`:
-* 
-* 
+There are two main output files of `lamlpro`: the `*.newick` output tree in newick format, and `*results.json` which contains important parameter estimates as well as metadata. 
 
 > [!TIP]
 > Use the flag `--ultrametric` to ensure the cell lineage tree has equal
@@ -124,7 +109,8 @@ python scripts/neighbor_joining.py examples/n250_m30_character_matrix/character_
 ```
 
 > [!TIP]
-> This script uses the neighbor joining implementation from biopython. You should install it with `conda install -c conda-forge biopython`. 
+> This script uses the neighbor joining implementation from biopython and pandas. You should install it with `brew install ipopt`. Alternatively you can install it with conda. Also install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
+
 
 This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
 `examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
