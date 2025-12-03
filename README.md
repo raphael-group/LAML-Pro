@@ -23,18 +23,16 @@ sure to initialize all git submodules.
 ```bash
 git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
-
-To ensure the packages can be found, you can run `export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"`.
-
-> [!TIP]
-> Problems with these steps cause errors like `Package 'ipopt' required by 'virtual:world' not found` or `Could NOT find PkgConfig`. 
-
+Install the dependencies with 
+```bash
+conda install -c conda-forge ipopt
+```
 Please change directories into LAML-Pro (`cd LAML-Pro`) and run the following commands:
 
 ```bash
 mkdir build
 cd build
-cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake .. 
 make
 mv src/lamlpro ../lamlpro
 ```
@@ -174,10 +172,10 @@ initial_weighted_hamming_tree.nwk     130                 0.670103
 
 With either initial tree, one can run `lamlpro` with the following command:
 ```
-./lamlpro --matrix examples/n100_m400_observation_matrix/observation_matrix.csv --tree examples/n100_m400_observation_matrix/initial_weighted_hamming.nwk -o examples/n100_m400_observation_matrix/lamlpro --ultrametric --mode search --max-iterations 2500 --data-type "observation-matrix"
+./lamlpro --matrix examples/n100_m400_observation_matrix/observation_matrix.csv --tree examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk -o examples/n100_m400_observation_matrix/lamlpro --ultrametric --mode search --max-iterations 2500 --data-type "observation-matrix"
 ```
 The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
-iterations. For practical applications, we recommend setting this value higher and making
+iterations. You can change this number of iterations to be smaller for an initial test. For practical applications, we recommend setting this value higher and making
 sure that the algorithm converges by checking that the log-likelihood improvements have plateaued (by looking at the `.json` output file). The preceding command results in four output files:
 `examples//n100_m400_observation_matrixlamlpro_tree.newick` and 
 `examples/n100_m400_observation_matrix/lamlpro_results.json` and
