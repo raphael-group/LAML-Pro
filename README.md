@@ -107,7 +107,7 @@ python scripts/neighbor_joining.py examples/n250_m30_character_matrix/character_
 ```
 
 > [!TIP]
-> This script uses the neighbor joining implementation from biopython and pandas. You should install it with `brew install ipopt`. Alternatively you can install it with conda. Also install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
+> This script uses the neighbor joining implementation from biopython and pandas. You can install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
 
 
 This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
@@ -157,7 +157,8 @@ python scripts/neighbor_joining.py examples/n100_m400_observation_matrix/argmax_
 ```
 
 > [!TIP]
-> This script uses the neighbor joining implementation from biopython and pandas. You should install it with `brew install ipopt`. Alternatively you can install it with conda. Also install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
+> This script uses the neighbor joining implementation from biopython and pandas. You can install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
+
 
 This results in two files `examples/n100_m400_observation_matrix/initial_hamming_tree.nwk` and
 `examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
