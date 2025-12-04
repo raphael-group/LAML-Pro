@@ -16,17 +16,14 @@ If you are interested in reproducing the analyses in this paper, the reproducibi
 
 ## Installation
 
-To build `lamlpro` manually requires only a modern C++20 compiler and CMake. 
+To build `lamlpro` manually requires only a modern C++20 compiler and CMake. We recommend using python 3.10 for the helper scripts.
 To install, simply clone the repository and compile the code using CMake, making
 sure to initialize all git submodules.
 
 ```bash
 git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
-Install the dependencies with 
-```bash
-conda install -c conda-forge ipopt
-```
+We refer the user to the ipopt installation instructions [here](https://coin-or.github.io/Ipopt/INSTALL.html).
 Please change directories into LAML-Pro (`cd LAML-Pro`) and run the following commands:
 
 ```bash
@@ -137,6 +134,10 @@ On this example, `lamlpro` should improve the tree topology and this can be veri
 running:
 ```
 python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
+```
+
+Example output:
+```
 Tree                                     RF Distance    Normalized RF
 initial_hamming_tree.nwk                 404            0.817814
 lamlpro_tree.hamming.newick              316            0.753036
@@ -148,32 +149,13 @@ lamlpro_tree.tree.newick                 136            0.275304
 ### Example 2: Observation Matrix
 
 To apply `lamlpro` to observation matrix data, we first infer a cell lineage tree
-$\mathcal{T}_0$ with $n = 100$ cells using the Neighbor Joining (NJ) algorithm. 
-The initial
-tree can be inferred using any method, but for the sake of the example,
-we use the following command:
-```
-python scripts/neighbor_joining.py examples/n100_m400_observation_matrix/argmax_character_matrix.csv examples/n100_m400_observation_matrix/initial
-```
+$\mathcal{T}_0$ with $n = 100$ cells using the Neighbor Joining (NJ) algorithm, as above.
 
-> [!TIP]
-> This script uses the neighbor joining implementation from biopython and pandas. You can install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
+We provide an initial starting tree `argmax_nj.nwk` if you would like to skip directly to testing `lamlpro`. This example corresponds to simulated data condition `k400_s0_sub100_r01_dim3_r0.0439_p0.0`. 
 
-
-This results in two files `examples/n100_m400_observation_matrix/initial_hamming_tree.nwk` and
-`examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
-distance from the inferred and true trees, we see that both are quite far away from
-the ground truth:
+With an initial tree, one can run `lamlpro` with the following command:
 ```
-python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk
-Tree                                  RF Distance         Normalized RF
-initial_hamming_tree.nwk              120                 0.618557
-initial_weighted_hamming_tree.nwk     130                 0.670103
-```
-
-With either initial tree, one can run `lamlpro` with the following command:
-```
-./lamlpro --matrix examples/n100_m400_observation_matrix/observation_matrix.csv --tree examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk -o examples/n100_m400_observation_matrix/lamlpro --ultrametric --mode search --max-iterations 2500 --data-type "observation-matrix"
+./lamlpro --matrix examples/n100_m400_observation_matrix/observation_matrix.csv --tree examples/n100_m400_observation_matrix/argmax_nj.nwk -o examples/n100_m400_observation_matrix/lamlpro --ultrametric --mode search --max-iterations 2500 --data-type "observation-matrix"
 ```
 The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
 iterations. You can change this number of iterations to be smaller for an initial test. For practical applications, we recommend setting this value higher and making
@@ -182,6 +164,7 @@ sure that the algorithm converges by checking that the log-likelihood improvemen
 `examples/n100_m400_observation_matrix/lamlpro_results.json` and
 `examples/n100_m400_observation_matrix/lamlpro_posterior_probs.csv` and
 `examples/n100_m400_observation_matrix/lamlpro_posterior_argmax.csv`.
+
 The first file is the inferred cell lineage tree with branch lengths (in mutation units) and the second contains 
 parameter estimates and important metadata, such as the per-iteration log-likelihood.
 The third file contains the probabilities over all states at each cell and site on the fixed maximum likelihood tree after convergence, and the fourth file contains the argmax *maximum a posteriori* (MAP) genotypes. 
@@ -189,11 +172,8 @@ The third file contains the probabilities over all states at each cell and site 
 On this example, `lamlpro` should improve the tree topology and this can be verified by 
 running:
 ```
-python scripts/metrics.py --reference examples/n100_m400_observation_matrix/tree.nwk --trees examples/n100_m400_observation_matrix/initial_hamming_tree.nwk examples/n100_m400_observation_matrix/initial_weighted_hamming_tree.nwk examples/n100_m400_observation_matrix/lamlpro_tree.newick
-Tree                                    RF Distance         Normalized RF
-initial_hamming_tree.nwk                120                 0.618557
-laml_pro_tree.hamming.newick            96                  0.494845
-initial_weighted_hamming_tree.nwk       130                 0.670103
-laml_pro_tree.weighted_hamming.newick   74                  0.381443
-laml_pro_tree.tree.newick               24                  0.123711
+python scripts/metrics.py --reference examples/n100_m400_observation_matrix/tree.nwk --trees examples/n100_m400_observation_matrix/argmax_nj.nwk examples/n100_m400_observation_matrix/example_output/lamlpro_test_tree.newick
+Tree                                               RF Distance Normalized RF
+examples/n100_m400_observation_matrix/argmax_nj.nwk         24     0.123711
+examples/n100_m400_observation_matrix/example_output/lamlpro_test_tree.newick          0     0.000000
 ```
