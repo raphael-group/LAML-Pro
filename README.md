@@ -160,7 +160,7 @@ With an initial tree, one can run `lamlpro` with the following command:
 The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
 iterations. You can change this number of iterations to be smaller for an initial test. For practical applications, we recommend setting this value higher and making
 sure that the algorithm converges by checking that the log-likelihood improvements have plateaued (by looking at the `.json` output file). The preceding command results in four output files:
-`examples//n100_m400_observation_matrixlamlpro_tree.newick` and 
+`examples/n100_m400_observation_matrix/lamlpro_tree.newick` and 
 `examples/n100_m400_observation_matrix/lamlpro_results.json` and
 `examples/n100_m400_observation_matrix/lamlpro_posterior_probs.csv` and
 `examples/n100_m400_observation_matrix/lamlpro_posterior_argmax.csv`.
