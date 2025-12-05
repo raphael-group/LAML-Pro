@@ -23,7 +23,8 @@ sure to initialize all git submodules.
 ```bash
 git clone git@github.com:raphael-group/LAML-Pro.git --recursive
 ```
-We refer the user to the ipopt installation instructions [here](https://coin-or.github.io/Ipopt/INSTALL.html).
+We refer the user to the ipopt installation instructions [here](https://coin-or.github.io/Ipopt/INSTALL.html). 
+Generally, however, if you are on MacOS you can install with `brew install ipopt` and on Linux you can run `conda install -c conda-forge ipopt`. 
 Please change directories into LAML-Pro (`cd LAML-Pro`) and run the following commands:
 
 ```bash
