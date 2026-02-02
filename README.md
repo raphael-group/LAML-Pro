@@ -39,6 +39,26 @@ from the command line. For ease of use, we suggest adding the `lamlpro`
 binary to a directory listed in the `PATH` environmental variable.
 At the end of these steps, `lamlpro` should sit in the root directory.
 
+### Python Library Installation
+
+We also provide Python bindings (`pylaml`) that expose the core optimization API.
+This allows you to use `lamlpro` directly from Python with numpy arrays.
+
+**Requirements:**
+- Python >= 3.8
+- numpy >= 1.20
+- IPOPT (must be installed on your system, see above)
+
+**Installation:**
+```bash
+pip install .
+```
+
+To verify the installation:
+```bash
+python -c "import pylaml; print(pylaml.__version__)"
+```
+
 ## Usage
 
 `lamlpro` is a command-line tool to infer a cell lineage tree $\mathcal{T}$
@@ -114,9 +134,9 @@ distance from the inferred and true trees, we see that both are quite far away f
 the ground truth:
 ```
 python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk
-Tree                                  RF Distance         Normalized RF
-initial_hamming_tree.nwk              404                 0.817814
-initial_weighted_hamming_tree.nwk     356                 0.720648
+Tree                                               RF Distance Normalized RF
+examples/n250_m30_character_matrix/initial_hamming_tree.nwk        404     0.817814
+examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk        356     0.720648
 ```
 
 With either initial tree, one can run `lamlpro` with the following command:
@@ -131,20 +151,18 @@ sure that the algorithm converges by checking that the log-likelihood improvemen
 The first file is the inferred cell lineage tree with branch lengths (in mutation units) and the second contains 
 parameter estimates and important metadata, such as the per-iteration log-likelihood.
 
-On this example, `lamlpro` should improve the tree topology and this can be verified by 
+On this example, `lamlpro` should improve the tree topology and this can be verified by
 running:
 ```
-python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
+python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
 ```
 
 Example output:
 ```
-Tree                                     RF Distance    Normalized RF
-initial_hamming_tree.nwk                 404            0.817814
-lamlpro_tree.hamming.newick              316            0.753036
-initial_weighted_hamming_tree.nwk        356            0.720648
-lamlpro_tree.weighted_hamming.newick     316            0.639676
-lamlpro_tree.tree.newick                 136            0.275304
+Tree                                               RF Distance Normalized RF
+examples/n250_m30_character_matrix/initial_hamming_tree.nwk        404     0.817814
+examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk        356     0.720648
+examples/n250_m30_character_matrix/lamlpro_tree.newick        140     0.283401
 ```
 
 ### Example 2: Observation Matrix
@@ -170,7 +188,7 @@ The first file is the inferred cell lineage tree with branch lengths (in mutatio
 parameter estimates and important metadata, such as the per-iteration log-likelihood.
 The third file contains the probabilities over all states at each cell and site on the fixed maximum likelihood tree after convergence, and the fourth file contains the argmax *maximum a posteriori* (MAP) genotypes. 
 
-On this example, `lamlpro` should improve the tree topology and this can be verified by 
+On this example, `lamlpro` should improve the tree topology and this can be verified by
 running:
 ```
 python scripts/metrics.py --reference examples/n100_m400_observation_matrix/tree.nwk --trees examples/n100_m400_observation_matrix/argmax_nj.nwk examples/n100_m400_observation_matrix/example_output/lamlpro_test_tree.newick
@@ -178,3 +196,223 @@ Tree                                               RF Distance Normalized RF
 examples/n100_m400_observation_matrix/argmax_nj.nwk         24     0.123711
 examples/n100_m400_observation_matrix/example_output/lamlpro_test_tree.newick          0     0.000000
 ```
+
+## Python API
+
+The `pylaml` Python library provides direct access to the optimization algorithms
+without file I/O. This is useful for integrating `lamlpro` into Python workflows
+or implementing custom topology search algorithms.
+
+### Quick Start
+
+```python
+import pylaml
+import numpy as np
+
+# Define a tree structure
+tree = pylaml.make_tree(
+    edges=[(4, 3), (3, 0), (3, 1), (4, 2)],  # (parent, child) pairs
+    branch_lengths=[0.1, 0.1, 0.2, 0.1, 0.0],  # indexed by node
+    num_leaves=3
+)
+
+# Define character matrix (rows=leaves, cols=characters)
+# Use -1 for missing data
+char_matrix = np.array([
+    [0, 1, 0],  # leaf 0
+    [1, 0, 1],  # leaf 1
+    [0, 1, 1],  # leaf 2
+], dtype=np.int32)
+
+# Run EM optimization
+result = pylaml.optimize(
+    tree=tree,
+    character_matrix=char_matrix,
+    max_iterations=100
+)
+
+print(f"Log-likelihood: {result.log_likelihood:.2f}")
+print(f"Nu (mutation rate): {result.nu:.4f}")
+print(f"Phi (dropout rate): {result.phi:.4f}")
+```
+
+### Tree Format
+
+Trees are represented as Python dictionaries with the following structure:
+
+```python
+tree = {
+    "num_leaves": 3,           # Number of leaf nodes
+    "num_nodes": 5,            # Total nodes (leaves + internal)
+    "root": 4,                 # Root node index
+    "edges": [(4, 3), ...],    # List of (parent, child) tuples
+    "branch_lengths": [...],   # Branch lengths indexed by node
+    "node_names": [...]        # Optional node names
+}
+```
+
+Leaves must be indexed `0` to `num_leaves - 1`. The character matrix rows
+must correspond to leaves in this order.
+
+### API Reference
+
+#### `pylaml.optimize()`
+
+Run EM optimization on a phylogenetic tree.
+
+```python
+result = pylaml.optimize(
+    tree,                          # Tree dictionary
+    character_matrix=None,         # Character matrix (n_leaves, n_chars), int32
+    observation_matrix=None,       # OR observation matrix (n_leaves, n_chars, n_states), float64
+    mutation_priors=None,          # Prior probabilities (n_chars, n_states), optional
+    initial_nu=0.5,                # Initial mutation rate
+    initial_phi=0.5,               # Initial dropout rate
+    ultrametric=False,             # Enforce ultrametric constraint
+    max_iterations=100             # Maximum EM iterations
+)
+```
+
+Returns an `EMResults` object with:
+- `log_likelihood`: Final log-likelihood
+- `num_iterations`: Number of iterations performed
+- `optimized_tree`: Tree dict with optimized branch lengths
+- `nu`, `phi`: Optimized parameters
+- `posterior_probabilities`: Array of shape (n_chars, n_nodes, n_states)
+
+#### `pylaml.compute_likelihood()`
+
+Compute log-likelihood without optimization.
+
+```python
+llh = pylaml.compute_likelihood(
+    tree,
+    character_matrix=char_matrix,
+    nu=0.3,
+    phi=0.1
+)
+```
+
+#### `pylaml.project_ultrametric()`
+
+Project tree to satisfy ultrametric constraint.
+
+```python
+ultrametric_tree = pylaml.project_ultrametric(tree)
+```
+
+#### `pylaml.make_tree()`
+
+Helper to create tree dictionaries.
+
+```python
+tree = pylaml.make_tree(
+    edges=[(4, 3), (3, 0), (3, 1), (4, 2)],
+    branch_lengths=[0.1, 0.1, 0.2, 0.1, 0.0],
+    num_leaves=3,
+    node_names=None,  # Optional
+    root=None         # Auto-inferred if not provided
+)
+```
+
+### Example: Loading Data from Files
+
+Here's how to load a character matrix and tree from files:
+
+```python
+import pylaml
+import numpy as np
+import csv
+import dendropy
+
+def load_character_matrix(path):
+    """Load character matrix from CSV file."""
+    with open(path, 'r') as f:
+        reader = csv.reader(f)
+        header = next(reader)  # skip header
+        rows = list(reader)
+        cell_names = [row[0] for row in rows]
+        char_matrix = np.array([
+            [-1 if x == '?' else int(x) for x in row[1:]]
+            for row in rows
+        ], dtype=np.int32)
+    return cell_names, char_matrix
+
+def load_tree(tree_path):
+    """Load tree from Newick file."""
+    dtree = dendropy.Tree.get(path=tree_path, schema="newick")
+
+    num_leaves = len(dtree.leaf_nodes())
+    num_nodes = len(list(dtree))
+
+    # Map nodes: leaves first (0 to num_leaves-1), then internal
+    leaf_map, internal_map = {}, {}
+    leaf_idx, internal_idx = 0, num_leaves
+
+    for node in dtree.postorder_node_iter():
+        if node.is_leaf():
+            leaf_map[node] = leaf_idx
+            leaf_idx += 1
+        else:
+            internal_map[node] = internal_idx
+            internal_idx += 1
+
+    node_map = {**leaf_map, **internal_map}
+
+    edges, branch_lengths, node_names = [], [0.0] * num_nodes, [""] * num_nodes
+
+    for node in dtree.postorder_node_iter():
+        idx = node_map[node]
+        branch_lengths[idx] = node.edge.length or 0.0
+        node_names[idx] = node.taxon.label if node.is_leaf() else f"internal_{idx}"
+        if node.parent_node:
+            edges.append((node_map[node.parent_node], idx))
+
+    root_idx = node_map[dtree.seed_node]
+    branch_lengths[root_idx] = 0.0  # Root has no branch
+
+    return {
+        "num_leaves": num_leaves, "num_nodes": num_nodes, "root": root_idx,
+        "edges": edges, "branch_lengths": branch_lengths, "node_names": node_names
+    }
+
+# Load data
+cell_names, char_matrix = load_character_matrix(
+    "examples/n250_m30_character_matrix/character_matrix.csv"
+)
+tree = load_tree("examples/n250_m30_character_matrix/tree.nwk")
+
+# Reorder matrix to match tree leaf order
+tree_leaf_order = [tree["node_names"][i] for i in range(tree["num_leaves"])]
+cell_to_row = {name: i for i, name in enumerate(cell_names)}
+reordered_indices = [cell_to_row[name] for name in tree_leaf_order]
+char_matrix = char_matrix[reordered_indices]
+
+# Run optimization
+result = pylaml.optimize(tree=tree, character_matrix=char_matrix, max_iterations=100)
+print(f"Log-likelihood: {result.log_likelihood:.2f}")
+print(f"Nu: {result.nu:.4f}, Phi: {result.phi:.4f}")
+```
+
+### Example: Observation Matrix
+
+For probabilistic observation data, pass a 3D array of log-probabilities:
+
+```python
+import pylaml
+import numpy as np
+
+# observation_matrix shape: (n_leaves, n_characters, n_states)
+# Values should be log-probabilities including state 0 (unmutated)
+obs_matrix = np.array([...], dtype=np.float64)  # shape (100, 400, 4)
+
+result = pylaml.optimize(
+    tree=tree,
+    observation_matrix=obs_matrix,  # Full matrix including state 0
+    max_iterations=100
+)
+```
+
+> [!NOTE]
+> For observation matrices, include all states (including state 0).
+> The library handles state 0 exclusion internally when computing priors.

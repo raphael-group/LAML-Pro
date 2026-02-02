@@ -74,6 +74,62 @@ class EMResults:
         )
 
 
+def recode_character_matrix(char_matrix: np.ndarray) -> np.ndarray:
+    """Recode character states to be contiguous (0, 1, 2, ...).
+
+    The C++ LAML implementation expects character states to be contiguous
+    integers starting at 0. This function remaps non-contiguous states
+    (e.g., {0, 3, 15, 27}) to contiguous ones ({0, 1, 2, 3}).
+
+    State 0 (unmutated) is always mapped to 0. Missing data (-1) is preserved.
+
+    Parameters
+    ----------
+    char_matrix : numpy.ndarray
+        Character matrix with shape (leaves, characters), dtype int32.
+        Values are character states, with -1 indicating missing data.
+
+    Returns
+    -------
+    numpy.ndarray
+        Recoded character matrix with contiguous states per character.
+
+    Examples
+    --------
+    >>> matrix = np.array([[0, 3], [0, 15], [1, 0]], dtype=np.int32)
+    >>> recoded = recode_character_matrix(matrix)
+    >>> # Column 0: {0, 1} -> {0, 1}
+    >>> # Column 1: {0, 3, 15} -> {0, 1, 2}
+    """
+    n_leaves, n_chars = char_matrix.shape
+    recoded = np.zeros_like(char_matrix)
+
+    for c in range(n_chars):
+        col = char_matrix[:, c]
+        # Get unique states excluding missing (-1), sorted
+        unique_states = sorted(set(col) - {-1})
+
+        # Build mapping: 0 always maps to 0, then others in sorted order
+        state_map = {0: 0}
+        next_idx = 1
+        for s in unique_states:
+            if s != 0 and s not in state_map:
+                state_map[s] = next_idx
+                next_idx += 1
+
+        # Apply mapping
+        for i in range(n_leaves):
+            if col[i] == -1:
+                recoded[i, c] = -1
+            elif col[i] in state_map:
+                recoded[i, c] = state_map[col[i]]
+            else:
+                # Unexpected state - treat as missing
+                recoded[i, c] = -1
+
+    return recoded
+
+
 def make_tree(
     edges: List[Tuple[int, int]],
     branch_lengths: List[float],
@@ -231,6 +287,8 @@ def optimize(
                 f"character_matrix has {character_matrix.shape[0]} rows but tree has "
                 f"{tree['num_leaves']} leaves"
             )
+        # Recode character states to be contiguous (required by C++ implementation)
+        character_matrix = recode_character_matrix(character_matrix)
 
     # Convert and validate observation matrix
     if observation_matrix is not None:
@@ -317,6 +375,8 @@ def compute_likelihood(
 
     if character_matrix is not None:
         character_matrix = np.asarray(character_matrix, dtype=np.int32)
+        # Recode character states to be contiguous (required by C++ implementation)
+        character_matrix = recode_character_matrix(character_matrix)
 
     if observation_matrix is not None:
         observation_matrix = np.asarray(observation_matrix, dtype=np.float64)
