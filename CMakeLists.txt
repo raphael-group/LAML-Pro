@@ -33,3 +33,9 @@ add_subdirectory(third-party/gcem)
 add_subdirectory(third-party/nanobench)
 add_subdirectory(third-party/osqp)
 add_subdirectory(third-party/Catch2)
+
+# Python bindings option
+option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
+if(BUILD_PYTHON_BINDINGS)
+    add_subdirectory(python)
+endif()
