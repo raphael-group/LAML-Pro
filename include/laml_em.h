@@ -1,3 +1,6 @@
+#ifndef LAML_EM_H
+#define LAML_EM_H
+
 #include "phylogeny.h"
 #include "models/laml.h"
 
@@ -32,3 +35,4 @@ void print_likelihood_buffer(const std::string& label,
                              size_t max_alphabet_size,
                              size_t num_nodes);
 
+#endif

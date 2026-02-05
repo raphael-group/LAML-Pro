@@ -198,7 +198,7 @@ def optimize(
     mutation_priors: Optional[np.ndarray] = None,
     initial_nu: float = 0.5,
     initial_phi: float = 0.5,
-    ultrametric: bool = False,
+    ultrametric: bool = True,
     max_iterations: int = 100,
     min_branch_length: float = 0.01,
     verbose: bool = False
@@ -415,3 +415,181 @@ def project_ultrametric(tree: Dict) -> Dict:
     >>> ultrametric_tree = pylaml.project_ultrametric(tree)
     """
     return _core.project_ultrametric(tree)
+
+
+class SearchResults:
+    """Results from topology search.
+
+    Attributes
+    ----------
+    log_likelihood : float
+        Final log-likelihood after search and final EM.
+    num_iterations : int
+        Number of simulated annealing iterations.
+    optimized_tree : dict
+        Tree dictionary with optimized topology and branch lengths.
+    nu : float
+        Optimized nu parameter (mutation rate).
+    phi : float
+        Optimized phi parameter (dropout rate).
+    posterior_probabilities : numpy.ndarray
+        Posterior probabilities with shape (characters, nodes, states).
+    log_likelihoods : list of float
+        Log-likelihood trajectory during search.
+    """
+
+    def __init__(self, core_result: _core.SearchResults):
+        self._result = core_result
+
+    @property
+    def log_likelihood(self) -> float:
+        return self._result.log_likelihood
+
+    @property
+    def num_iterations(self) -> int:
+        return self._result.num_iterations
+
+    @property
+    def optimized_tree(self) -> Dict:
+        return self._result.optimized_tree
+
+    @property
+    def nu(self) -> float:
+        return self._result.nu
+
+    @property
+    def phi(self) -> float:
+        return self._result.phi
+
+    @property
+    def posterior_probabilities(self) -> np.ndarray:
+        return self._result.posterior_probabilities
+
+    @property
+    def log_likelihoods(self) -> List[float]:
+        return self._result.log_likelihoods
+
+    def __repr__(self) -> str:
+        return (
+            f"SearchResults(log_likelihood={self.log_likelihood:.4f}, "
+            f"num_iterations={self.num_iterations}, "
+            f"nu={self.nu:.4f}, phi={self.phi:.4f})"
+        )
+
+
+def topology_search(
+    tree: Dict,
+    character_matrix: Optional[np.ndarray] = None,
+    observation_matrix: Optional[np.ndarray] = None,
+    mutation_priors: Optional[np.ndarray] = None,
+    initial_nu: float = 0.5,
+    initial_phi: float = 0.5,
+    ultrametric: bool = True,
+    strategy: str = "sim_annealing",
+    max_iterations: int = 20000,
+    temperature: float = 0.1,
+    min_branch_length: float = 0.01,
+    num_threads: int = 1,
+    verbose: bool = False
+) -> SearchResults:
+    """Search for optimal tree topology using NNI moves.
+
+    Parameters
+    ----------
+    tree : dict
+        Initial tree structure (same format as optimize()).
+    character_matrix : numpy.ndarray, optional
+        Character state matrix with shape (leaves, characters), dtype int32.
+        Use -1 for missing data.
+    observation_matrix : numpy.ndarray, optional
+        Observation probability matrix with shape (leaves, characters, states).
+    mutation_priors : numpy.ndarray, optional
+        Prior probabilities for mutations with shape (characters, states).
+    initial_nu : float
+        Initial nu parameter (mutation rate). Default 0.5.
+    initial_phi : float
+        Initial phi parameter (dropout rate). Default 0.5.
+    ultrametric : bool
+        Whether to constrain tree to be ultrametric. Default False.
+    strategy : str
+        Search strategy. Currently only "sim_annealing" is supported.
+    max_iterations : int
+        Maximum number of NNI iterations. Default 20000.
+    temperature : float
+        Starting temperature for simulated annealing. Default 0.1.
+    min_branch_length : float
+        Minimum branch length fraction for ultrametric trees. Default 0.01.
+    num_threads : int
+        Number of threads. Default 1.
+    verbose : bool
+        Whether to print progress. Default False.
+
+    Returns
+    -------
+    SearchResults
+        Object containing optimized tree, parameters, and search trajectory.
+
+    Raises
+    ------
+    ValueError
+        If strategy is not supported, or inputs are invalid.
+    """
+    if strategy != "sim_annealing":
+        raise ValueError(f"Unknown strategy '{strategy}'. Supported: 'sim_annealing'")
+
+    # Input validation
+    if character_matrix is None and observation_matrix is None:
+        raise ValueError("Must provide either character_matrix or observation_matrix")
+
+    if character_matrix is not None and observation_matrix is not None:
+        raise ValueError("Cannot provide both character_matrix and observation_matrix")
+
+    if character_matrix is not None:
+        character_matrix = np.asarray(character_matrix, dtype=np.int32)
+        if character_matrix.ndim != 2:
+            raise ValueError("character_matrix must be 2-dimensional (leaves, characters)")
+        if character_matrix.shape[0] != tree["num_leaves"]:
+            raise ValueError(
+                f"character_matrix has {character_matrix.shape[0]} rows but tree has "
+                f"{tree['num_leaves']} leaves"
+            )
+        character_matrix = recode_character_matrix(character_matrix)
+
+    if observation_matrix is not None:
+        observation_matrix = np.asarray(observation_matrix, dtype=np.float64)
+        if observation_matrix.ndim != 3:
+            raise ValueError(
+                "observation_matrix must be 3-dimensional (leaves, characters, states)"
+            )
+        if observation_matrix.shape[0] != tree["num_leaves"]:
+            raise ValueError(
+                f"observation_matrix has {observation_matrix.shape[0]} rows but tree has "
+                f"{tree['num_leaves']} leaves"
+            )
+
+    if mutation_priors is not None:
+        mutation_priors = np.asarray(mutation_priors, dtype=np.float64)
+        if mutation_priors.ndim != 2:
+            raise ValueError("mutation_priors must be 2-dimensional (characters, states)")
+
+    if not (NU_LB <= initial_nu <= NU_UB):
+        raise ValueError(f"initial_nu must be between {NU_LB} and {NU_UB}")
+    if not (PHI_LB <= initial_phi <= PHI_UB):
+        raise ValueError(f"initial_phi must be between {PHI_LB} and {PHI_UB}")
+
+    result = _core.topology_search(
+        tree=tree,
+        character_matrix=character_matrix,
+        observation_matrix=observation_matrix,
+        mutation_priors=mutation_priors,
+        initial_nu=initial_nu,
+        initial_phi=initial_phi,
+        ultrametric=ultrametric,
+        max_iterations=max_iterations,
+        temperature=temperature,
+        min_branch_length=min_branch_length,
+        num_threads=num_threads,
+        verbose=verbose
+    )
+
+    return SearchResults(result)
