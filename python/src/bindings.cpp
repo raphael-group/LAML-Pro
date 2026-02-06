@@ -12,6 +12,8 @@
 #include "topology_search.h"
 #include "constants.h"
 
+#include <random>
+
 namespace py = pybind11;
 
 /**
@@ -277,7 +279,8 @@ PySearchResults run_search(
     double temperature,
     double min_branch_length,
     unsigned int num_threads,
-    bool verbose
+    bool verbose,
+    unsigned int seed
 ) {
     // Convert tree
     tree t = dict_to_tree(tree_dict);
@@ -339,11 +342,20 @@ PySearchResults run_search(
         ultrametric, min_branch_length, temperature
     );
 
-    // Final EM on result tree (matches search_optimal_tree behavior)
+    // Final EM on result tree with deterministic random parameters.
+    // Matches search_optimal_tree in fastlaml.cxx: the same mt19937(seed)
+    // generator produces initial_phi (1st), initial_nu (2nd), then
+    // final_phi (3rd) and final_nu (4th) values.
     tree result_tree = sa_result.best_tree;
+    std::mt19937 final_gen(seed);
+    std::uniform_real_distribution<float> final_dist(0.05f, 0.95f);
+    final_dist(final_gen); // skip 1st (initial_phi)
+    final_dist(final_gen); // skip 2nd (initial_nu)
+    double final_phi = final_dist(final_gen);
+    double final_nu = final_dist(final_gen);
     laml_model model(
         char_matrix, obs_matrix, mutation_priors,
-        initial_nu, initial_phi, data_type,
+        final_phi, final_nu, data_type,
         ultrametric, min_branch_length, 1.0
     );
     em_results em_res = laml_expectation_maximization(result_tree, model, 100, verbose);
@@ -505,6 +517,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("min_branch_length") = 0.01,
         py::arg("num_threads") = 1,
         py::arg("verbose") = false,
+        py::arg("seed") = 73,
         R"pbdoc(
             Search for optimal tree topology using NNI moves with simulated annealing.
 
@@ -534,6 +547,8 @@ PYBIND11_MODULE(_core, m) {
                 Number of threads. Default 1.
             verbose : bool
                 Whether to print progress. Default False.
+            seed : int
+                Random seed used for deterministic final EM parameters. Default 73.
 
             Returns
             -------
@@ -548,6 +563,24 @@ PYBIND11_MODULE(_core, m) {
     m.attr("NU_UB") = NU_UB;
     m.attr("PHI_LB") = PHI_LB;
     m.attr("PHI_UB") = PHI_UB;
+
+    // Generate initial parameters matching the C++ CLI's RNG
+    m.def("generate_initial_params", [](unsigned int seed, unsigned int num_branch_lengths) {
+        std::mt19937 gen(seed);
+        std::uniform_real_distribution<float> dist(0.05f, 0.95f);
+        double phi = dist(gen);
+        double nu = dist(gen);
+        std::vector<double> branch_lengths(num_branch_lengths);
+        for (auto& bl : branch_lengths) {
+            bl = dist(gen);
+        }
+        return py::make_tuple(phi, nu, branch_lengths);
+    },
+        py::arg("seed"),
+        py::arg("num_branch_lengths") = 0,
+        "Generate initial phi, nu (and optionally branch lengths) using the same "
+        "RNG as the C++ CLI for a given seed."
+    );
 
     m.attr("__version__") = "0.1.0";
 }

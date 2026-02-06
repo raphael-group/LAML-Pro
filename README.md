@@ -113,57 +113,57 @@ We provide simulated cell lineage trees with $n = 100, 250, 500$ nodes, $400$ ch
 and simulated observations in order to demonstrate `lamlpro`.
 
 
-
 ### Example 1: Character Matrix
 To apply `lamlpro` to character matrix data, we first infer a cell lineage tree
 $\mathcal{T}_0$ with $n = 250$ cells using the Neighbor Joining (NJ) algorithm. 
-The initial
-tree can be inferred using any method, but for the sake of the example,
+The initial tree can be inferred using any method, but for the sake of the example,
 we use the following command:
 ```
-python scripts/neighbor_joining.py examples/n250_m30_character_matrix/character_matrix.csv examples/n250_m30_character_matrix/initial
+python scripts/neighbor_joining.py examples/n250_character_matrix/character_matrix.csv examples/n250_character_matrix/s50d50p01_sub250_r01_initial
 ```
 
 > [!TIP]
 > This script uses the neighbor joining implementation from biopython and pandas. You can install Python dependencies for the other scripts with `pip3 install biopython pandas dendropy scipy`.
 
-
-This results in two files `examples/n250_m30_character_matrix/initial_hamming_tree.nwk` and
-`examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
+This results in two files `examples/n250_character_matrix/initial_hamming_tree.nwk` and
+`examples/n250_character_matrix/initial_weighted_hamming_tree.nwk`. If we compute the
 distance from the inferred and true trees, we see that both are quite far away from
 the ground truth:
 ```
-python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk
+python scripts/metrics.py --reference examples/n250_character_matrix/tree.nwk --trees examples/n250_character_matrix/initial_hamming_tree.nwk examples/n250_character_matrix/initial_weighted_hamming_tree.nwk
 Tree                                               RF Distance Normalized RF
-examples/n250_m30_character_matrix/initial_hamming_tree.nwk        404     0.817814
-examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk        356     0.720648
+examples/n250_character_matrix/initial_hamming_tree.nwk        404     0.817814
+examples/n250_character_matrix/initial_weighted_hamming_tree.nwk        356     0.720648
 ```
 
-With either initial tree, one can run `lamlpro` with the following command:
+Next, we can run `lamlpro` with the following command:
 ```
-./lamlpro --matrix examples/n250_m30_character_matrix/character_matrix.csv --tree examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk -o examples/n250_m30_character_matrix/lamlpro --ultrametric --mode search --max-iterations 2500
+./lamlpro --matrix examples/n250_character_matrix/character_matrix.csv --tree examples/n250_character_matrix/initial_weighted_hamming_tree.nwk -o examples/n250_character_matrix/lamlpro --ultrametric --mode search --max-iterations 2500
 ```
 The preceding command enforces that the tree is ultrametric and runs topology search for `2500`
 iterations. For practical applications, we recommend setting this value higher and making
 sure that the algorithm converges by checking that the log-likelihood improvements have plateaued (by looking at the `.json` output file). The preceding command results in two output files:
-`examples/n250_m30_character_matrix/lamlpro_tree.newick` and 
-`examples/n250_m30_character_matrix/lamlpro_results.json`.
+`examples/n250_character_matrix/lamlpro_tree.newick` and 
+`examples/n250_character_matrix/lamlpro_results.json`.
 The first file is the inferred cell lineage tree with branch lengths (in mutation units) and the second contains 
 parameter estimates and important metadata, such as the per-iteration log-likelihood.
 
 On this example, `lamlpro` should improve the tree topology and this can be verified by
 running:
 ```
-python scripts/metrics.py --reference examples/n250_m30_character_matrix/tree.nwk --trees examples/n250_m30_character_matrix/initial_hamming_tree.nwk examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk examples/n250_m30_character_matrix/lamlpro_tree.newick
+python scripts/metrics.py --reference examples/n250_character_matrix/tree.nwk --trees examples/n250_character_matrix/example_output/s50d50p01_sub250_r01_initial_hamming_tree.nwk examples/n250_character_matrix/example_output/s50d50p01_sub250_r01_initial_weighted_hamming_tree.nwk examples/n250_character_matrix/example_output/s50d50p01_sub250_r01_laml_trees.nwk examples/n250_character_matrix/example_output/s50d50p01_sub250_r01_lamlpro_tree.newick
 ```
 
 Example output:
 ```
 Tree                                               RF Distance Normalized RF
-examples/n250_m30_character_matrix/initial_hamming_tree.nwk        404     0.817814
-examples/n250_m30_character_matrix/initial_weighted_hamming_tree.nwk        356     0.720648
-examples/n250_m30_character_matrix/lamlpro_tree.newick        140     0.283401
+s50d50p01_sub250_r01_initial_hamming_tree.nwk             248     0.502024
+s50d50p01_sub250_r01_initial_weighted_hamming_tree.nwk        214     0.433198
+s50d50p01_sub250_r01_laml_trees.nwk        186     0.375758
+s50d50p01_sub250_r01_lamlpro_tree.newick                  130     0.263158
 ```
+> [!NOTE]
+> Example 1 is drawn from the LAML simulated data (`s50d50p01_sub250_r01`). We additionally provide a comparison to LAML to demonstrate that on a character matrix, LAML-Pro recapitulates LAML accuracy but improves in terms of computational efficiency. See the logfiles in `example_output/` folder to see how we ran LAML for this comparison. LAML-Pro takes `10` minutes to evaluate `2500` NNI moves and improve the tree to `0.26` normalized RF, whereas LAML takes `27` minutes to converge and improve the tree to `0.38` normalized RF.
 
 ### Example 2: Observation Matrix
 
@@ -293,14 +293,6 @@ llh = pylaml.compute_likelihood(
 )
 ```
 
-#### `pylaml.project_ultrametric()`
-
-Project tree to satisfy ultrametric constraint.
-
-```python
-ultrametric_tree = pylaml.project_ultrametric(tree)
-```
-
 #### `pylaml.make_tree()`
 
 Helper to create tree dictionaries.
@@ -378,9 +370,9 @@ def load_tree(tree_path):
 
 # Load data
 cell_names, char_matrix = load_character_matrix(
-    "examples/n250_m30_character_matrix/character_matrix.csv"
+    "examples/n250_character_matrix/character_matrix.csv"
 )
-tree = load_tree("examples/n250_m30_character_matrix/tree.nwk")
+tree = load_tree("examples/n250_character_matrix/tree.nwk")
 
 # Reorder matrix to match tree leaf order
 tree_leaf_order = [tree["node_names"][i] for i in range(tree["num_leaves"])]
@@ -416,3 +408,61 @@ result = pylaml.optimize(
 > [!NOTE]
 > For observation matrices, include all states (including state 0).
 > The library handles state 0 exclusion internally when computing priors.
+
+#### `pylaml.topology_search()`
+
+Search for an optimal tree topology using simulated annealing with nearest-neighbour interchange (NNI) moves.
+
+```python
+result = pylaml.topology_search(
+    tree,                          # Tree dictionary (initial topology)
+    character_matrix=None,         # Character matrix (n_leaves, n_chars), int32
+    observation_matrix=None,       # OR observation matrix (n_leaves, n_chars, n_states), float64
+    mutation_priors=None,          # Prior probabilities (n_chars, n_states), optional
+    initial_nu=0.5,                # Initial mutation rate
+    initial_phi=0.5,               # Initial dropout rate
+    ultrametric=True,              # Enforce ultrametric constraint
+    strategy="sim_annealing",      # Search strategy (only "sim_annealing" supported)
+    max_iterations=20000,          # Maximum NNI iterations
+    temperature=0.1,               # Starting temperature for simulated annealing
+    min_branch_length=0.01,        # Minimum branch length (relative to tree height)
+    num_threads=1,                 # Number of threads
+    verbose=False                  # Print progress
+)
+```
+
+Returns a `SearchResults` object with:
+- `log_likelihood`: Final log-likelihood after search and final EM
+- `num_iterations`: Number of simulated annealing iterations performed
+- `optimized_tree`: Tree dict with optimized topology and branch lengths
+- `nu`, `phi`: Optimized parameters
+- `posterior_probabilities`: Array of shape (n_chars, n_nodes, n_states)
+- `log_likelihoods`: Log-likelihood trajectory during search
+
+#### `pylaml.run_lamlpro()`
+
+Run LAML-Pro with the same interface as the CLI. Reads a Newick tree and CSV
+data files, runs either parameter optimisation or topology search, and writes
+output files (Newick tree, posteriors CSV, and JSON summary).
+
+```python
+result = pylaml.run_lamlpro(
+    matrix,                        # Path to observed data CSV file
+    tree,                          # Path to rooted binary Newick tree file
+    output,                        # Prefix for output files
+    data_type="character-matrix",  # "character-matrix" or "observation-matrix"
+    mutation_priors="",            # Path to mutation priors CSV, or "" for uniform
+    mode="optimize",               # "optimize" (EM only) or "search" (SA topology search)
+    seed=73,                       # Random seed for reproducibility
+    ultrametric=False,             # Enforce ultrametric constraint
+    threads=1,                     # Number of threads (search mode)
+    max_iterations=20000,          # Maximum iterations (search mode)
+    temp=0.1,                      # Starting temperature (search mode)
+    min_branch_length=0.01,        # Minimum branch length (relative to tree height)
+    verbose=False                  # Print progress
+)
+```
+
+Returns an `EMResults` object (optimize mode) or `SearchResults` object (search mode).
+
+Output files written to `{output}_tree.newick`, `{output}_posterior.csv`, and `{output}_results.json`.
