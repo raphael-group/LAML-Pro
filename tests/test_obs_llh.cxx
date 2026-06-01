@@ -10,7 +10,7 @@
 #include "laml_em.h"
 #include "likelihood_utils.h"
 
-#define NEGATIVE_INFINITY (-1e7)
+#include "constants.h"
 
 //std::vector<std::vector<std::vector<double>>> observation_matrix({});
 
