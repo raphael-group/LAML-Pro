@@ -702,9 +702,9 @@ em_results laml_expectation_maximization(
     std::vector<double> params(t.num_nodes + 3);
     std::unique_ptr<IpoptApplication> app(IpoptApplicationFactory());
     app->Options()->SetIntegerValue("print_level", 0);
-    app->Options()->SetNumericValue("tol", 1e-4);
+    app->Options()->SetNumericValue("tol", 1e-5);
     app->Options()->SetStringValue("jac_c_constant", "yes");
-    app->Options()->SetStringValue("nlp_scaling_method", "none"); // a very important flag.
+    app->Options()->SetStringValue("nlp_scaling_method", "gradient-based");
     app->Options()->SetIntegerValue("max_iter", 10000);
     // app->Options()->SetStringValue("hessian_approximation", "limited-memory");
     // app->Options()->SetNumericValue("derivative_test_tol", 1e-3);
@@ -754,7 +754,10 @@ em_results laml_expectation_maximization(
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
             SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric, model.min_branch_length);
             ApplicationReturnStatus status = app->OptimizeTNLP(prob);
-            if (status != Solve_Succeeded) {
+            if (status == Solved_To_Acceptable_Level) {
+                spdlog::warn("IPOPT M-step solved to acceptable level only (status=1); continuing.");
+            } else if (status != Solve_Succeeded) {
+                spdlog::error("IPOPT M-step failed with status {}", (int)status);
                 throw std::runtime_error("Solver failed.");
             }
             params = prob->get_solution();
