@@ -185,3 +185,81 @@ class TestLikelihoodInputValidation:
             character_matrix=simple_character_matrix
         )
         assert np.isfinite(llh)
+
+
+class TestMemoryLayoutIndependence:
+    """Regression tests for issue: non-C-contiguous character matrices were
+    silently misread by the C++ bindings, scrambling the data and corrupting
+    the likelihood.
+
+    The numpy->C++ converters assumed a C-contiguous (row-major) layout. Inputs
+    that are not C-contiguous -- a transposed view, a slice, or a pandas
+    DataFrame's ``.values`` (frequently Fortran-ordered) -- were read with
+    hardcoded row-major offsets, effectively transposing the matrix. The
+    likelihood must depend only on the array's logical contents, not on its
+    in-memory layout.
+    """
+
+    def _tree_8_leaves(self):
+        # Balanced binary tree, leaves 0..7, internal 8..14, root 14.
+        edges = [(8, 0), (8, 1), (9, 2), (9, 3), (10, 4), (10, 5), (11, 6), (11, 7),
+                 (12, 8), (12, 9), (13, 10), (13, 11), (14, 12), (14, 13)]
+        return pylaml.make_tree(edges=edges,
+                                branch_lengths=[0.4] * 14 + [0.0],
+                                num_leaves=8, root=14)
+
+    def test_c_and_fortran_order_agree(self):
+        """Likelihood must be identical for C- and F-contiguous copies."""
+        tree = self._tree_8_leaves()
+        rng = np.random.RandomState(0)
+        cm = rng.randint(0, 6, size=(8, 12)).astype(np.int32)
+
+        c_order = np.ascontiguousarray(cm)
+        f_order = np.asfortranarray(cm)
+        assert c_order.flags["C_CONTIGUOUS"] and f_order.flags["F_CONTIGUOUS"]
+
+        llh_c = pylaml.compute_likelihood(tree=tree, character_matrix=c_order, nu=0.1, phi=0.05)
+        llh_f = pylaml.compute_likelihood(tree=tree, character_matrix=f_order, nu=0.1, phi=0.05)
+        assert llh_c == pytest.approx(llh_f, abs=1e-9)
+
+    def test_noncontiguous_view_matches_copy(self):
+        """A non-contiguous view (e.g. a strided slice) must match a copy."""
+        tree = self._tree_8_leaves()
+        rng = np.random.RandomState(1)
+        # Build a wider array, then take a strided column slice -> non-contiguous.
+        wide = rng.randint(0, 8, size=(8, 20)).astype(np.int32)
+        view = wide[:, ::2]  # 10 columns, not contiguous
+        assert not view.flags["C_CONTIGUOUS"]
+        llh_copy = pylaml.compute_likelihood(tree=tree, character_matrix=np.ascontiguousarray(view), nu=0.1, phi=0.05)
+        llh_view = pylaml.compute_likelihood(tree=tree, character_matrix=view, nu=0.1, phi=0.05)
+        assert llh_copy == pytest.approx(llh_view, abs=1e-9)
+
+    def test_joint_equals_sum_over_characters(self):
+        """Characters are independent: the joint log-likelihood must equal the
+        sum of the per-character log-likelihoods, regardless of differing
+        per-character alphabet sizes."""
+        tree = self._tree_8_leaves()
+        # Columns with deliberately heterogeneous alphabet sizes.
+        small = np.array([[0, 0, 0, 0, 1, 1, 1, 1]] * 4, dtype=np.int32).T   # 2 states
+        big = np.array([[0, 1, 2, 3, 4, 5, 6, 7]] * 4, dtype=np.int32).T     # 8 states
+        mix = np.concatenate([small, big], axis=1)
+
+        joint = pylaml.compute_likelihood(tree=tree, character_matrix=mix, nu=1e-6, phi=1e-3)
+        per_col = sum(
+            pylaml.compute_likelihood(tree=tree, character_matrix=mix[:, c:c + 1], nu=1e-6, phi=1e-3)
+            for c in range(mix.shape[1])
+        )
+        assert joint == pytest.approx(per_col, abs=1e-6)
+
+    def test_column_order_invariance(self):
+        """The joint log-likelihood must not depend on the column ordering."""
+        tree = self._tree_8_leaves()
+        small = np.array([[0, 0, 0, 0, 1, 1, 1, 1]] * 4, dtype=np.int32).T
+        big = np.array([[0, 1, 2, 3, 4, 5, 6, 7]] * 4, dtype=np.int32).T
+        ab = pylaml.compute_likelihood(tree=tree,
+                                       character_matrix=np.concatenate([small, big], axis=1),
+                                       nu=1e-6, phi=1e-3)
+        ba = pylaml.compute_likelihood(tree=tree,
+                                       character_matrix=np.concatenate([big, small], axis=1),
+                                       nu=1e-6, phi=1e-3)
+        assert ab == pytest.approx(ba, abs=1e-9)
