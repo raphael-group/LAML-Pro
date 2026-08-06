@@ -220,7 +220,8 @@ inline hill_climbing_result simulated_annealing(
     unsigned int num_threads,
     bool is_ultrametric,
     double min_branch_length,
-    double T0 = 0.1
+    double T0 = 0.1,
+    bool no_silencing = false
 ) {
     // Initialize simulated annealing parameters, inheriting from LAML
     const double alpha = 0.99;
@@ -230,7 +231,7 @@ inline hill_climbing_result simulated_annealing(
     const double eta = 1e-8; // minimum improvement
 
     tree current_tree = initial_tree;
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, inital_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length, 1.0, no_silencing);
     auto initial_result = laml_expectation_maximization(current_tree, model, 100, true);
     double current_log_likelihood = initial_result.log_likelihood;
 

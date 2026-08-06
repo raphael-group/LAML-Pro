@@ -265,12 +265,15 @@ class MStepProblem : public TNLP {
     std::vector<double> solution;
     bool ultrametric;
     double min_branch_length;
+    bool no_silencing;
     std::vector<std::vector<int>> paths;
 
     public:
-    MStepProblem(e_step_data data, tree t, std::vector<double> init, bool ultrametric = true, double min_branch_length_frac = 0.01) 
-    : data(data), t(t), init(init), ultrametric(ultrametric), min_branch_length(min_branch_length_frac)
-    { 
+    MStepProblem(e_step_data data, tree t, std::vector<double> init, bool ultrametric = true, double min_branch_length_frac = 0.01,
+                 bool no_silencing = false)
+    : data(data), t(t), init(init), ultrametric(ultrametric), min_branch_length(min_branch_length_frac),
+      no_silencing(no_silencing)
+    {
         if (ultrametric) paths = root_to_leaf_paths(t);
     }
 
@@ -328,6 +331,12 @@ class MStepProblem : public TNLP {
 
         x_u[0] = NU_UB;  // set nu \in [0, 100]
         x_u[1] = PHI_UB; // set phi \in [0, 1]
+
+        // --no-silencing: pin nu off. phi is left free; with nu = 0 its MLE is the
+        // observed missing fraction, so the fitted value serves as a consistency check.
+        if (no_silencing) {
+            x_l[0] = x_u[0] = NO_SILENCING_NU;
+        }
         return true;
     }
 
@@ -752,7 +761,8 @@ em_results laml_expectation_maximization(
 
         {
             e_step_data params_data = {responsibilities, leaf_responsibility, num_missing, num_not_missing};
-            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric, model.min_branch_length);
+            SmartPtr<MStepProblem> prob = new MStepProblem(params_data, t, params, model.ultrametric, model.min_branch_length,
+                                                          model.no_silencing);
             ApplicationReturnStatus status = app->OptimizeTNLP(prob);
             if (status == Solved_To_Acceptable_Level) {
                 spdlog::warn("IPOPT M-step solved to acceptable level only (status=1); continuing.");

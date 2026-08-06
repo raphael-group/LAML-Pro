@@ -129,6 +129,7 @@ void write_results(
     json output_json; // need to pass in command, model
     output_json["phi"] = model.parameters[1];
     output_json["nu"] = model.parameters[0];
+    output_json["no_silencing"] = model.no_silencing;
     output_json["em_iterations"] = em_res.num_iterations;
     output_json["best_log_likelihood"] = em_res.log_likelihood;
     output_json["command"] = command;
@@ -149,9 +150,11 @@ void write_results(
 
 void optimize_parameters(
     tree& t, const phylogeny_data& data, unsigned int seed, 
-    std::string output_prefix, bool is_ultrametric, double min_branch_length
+    std::string output_prefix, bool is_ultrametric, double min_branch_length,
+    bool no_silencing
 ) {
     spdlog::info("Optimizing model parameters and branch lengths...");
+    if (no_silencing) spdlog::info("--no-silencing: nu pinned to {}, phi inferred", NO_SILENCING_NU);
 
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist(0.05f, 0.95f);
@@ -175,7 +178,8 @@ void optimize_parameters(
 
     laml_model model(
         data.character_matrix, data.observation_matrix, data.mutation_priors, 
-        initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length
+        initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length,
+        1.0, no_silencing
     );
 
     auto em_res = laml_expectation_maximization(t, model, 100, true);
@@ -194,9 +198,10 @@ void optimize_parameters(
 void search_optimal_tree(
     tree& t, const phylogeny_data& data, unsigned int seed, 
     unsigned int num_threads, std::string output_prefix, size_t max_iterations, double temp,
-    bool is_ultrametric, double min_branch_length
+    bool is_ultrametric, double min_branch_length, bool no_silencing
 ) {
     spdlog::info("Searching for optimal tree...");
+    if (no_silencing) spdlog::info("--no-silencing: nu pinned to {}, phi inferred", NO_SILENCING_NU);
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -208,12 +213,12 @@ void search_optimal_tree(
     double initial_nu = dist(gen);
 
     // perform hill climbing
-    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, is_ultrametric, min_branch_length, temp);
+    auto result = simulated_annealing(t, data, initial_phi, initial_nu, max_iterations, num_threads, is_ultrametric, min_branch_length, temp, no_silencing);
     t = result.best_tree;
 
     initial_phi = dist(gen);
     initial_nu = dist(gen);
-    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length);
+    laml_model model(data.character_matrix, data.observation_matrix, data.mutation_priors, initial_phi, initial_nu, data.data_type, is_ultrametric, min_branch_length, 1.0, no_silencing);
     auto em_res = laml_expectation_maximization(t, model, 100, true);
     
     spdlog::info("Best log likelihood: {}", em_res.log_likelihood);
@@ -323,6 +328,11 @@ int main(int argc, char** argv) {
         .default_value(0.1)
         .scan<'g', double>();
 
+    program.add_argument("--no-silencing")
+        .help("switch off heritable silencing: pin nu to ~0 and phi to the observed missing fraction")
+        .default_value(false)
+        .implicit_value(true);
+
     program.add_argument("--min-branch-length")
         .help("minimum branch length relative to scaled tree with unit height")
         .default_value(0.01)
@@ -396,7 +406,8 @@ int main(int argc, char** argv) {
             t, data, seed, 
             program.get<std::string>("--output"), 
             program.get<bool>("--ultrametric"),
-            program.get<double>("--min-branch-length")
+            program.get<double>("--min-branch-length"),
+            program.get<bool>("--no-silencing")
         );
     } else {
         search_optimal_tree(
@@ -406,7 +417,8 @@ int main(int argc, char** argv) {
             program.get<unsigned int>("--max-iterations"),
             program.get<double>("--temp"),
             program.get<bool>("--ultrametric"),
-            program.get<double>("--min-branch-length")
+            program.get<double>("--min-branch-length"),
+            program.get<bool>("--no-silencing")
         );
     }
 

@@ -3,6 +3,7 @@
 
 #include "../digraph.h"
 #include "../phylogenetic_model.h"
+#include "../constants.h"
 
 /* 
  * Precomputed per-node values and buffers in the LAML model. Avoids recomputation
@@ -34,6 +35,11 @@ class laml_model : public phylogenetic_model<laml_data> {
     std::string data_type; // change
     bool ultrametric;
     double min_branch_length;
+    // When no_silencing is set, heritable silencing is switched off: nu is pinned to
+    // NO_SILENCING_NU and all missing data must be explained as dropout. phi is still
+    // inferred -- with nu = 0 its MLE is the observed missing fraction, so the fitted
+    // value is a useful check rather than an assumption.
+    bool no_silencing;
 
     laml_model(
         const std::vector<std::vector<int>>& character_matrix,
@@ -44,8 +50,12 @@ class laml_model : public phylogenetic_model<laml_data> {
         const std::string data_type,
         bool ultrametric = false,
         double min_branch_length = 0.01,
-        double timescale = 1.0
-    ) : character_matrix(character_matrix), observation_matrix(observation_matrix), mutation_priors(mutation_priors), data_type(data_type), ultrametric(ultrametric), min_branch_length(min_branch_length) {
+        double timescale = 1.0,
+        bool no_silencing = false
+    ) : character_matrix(character_matrix), observation_matrix(observation_matrix), mutation_priors(mutation_priors), data_type(data_type), ultrametric(ultrametric), min_branch_length(min_branch_length), no_silencing(no_silencing) {
+        if (no_silencing) {
+            nu = NO_SILENCING_NU;
+        }
         parameters = {nu, phi, timescale}; // nu, phi
         if (data_type == "character-matrix") {
             alphabet_sizes = std::vector<size_t>(character_matrix[0].size());
@@ -113,12 +123,18 @@ class laml_model : public phylogenetic_model<laml_data> {
         std::vector<laml_data> result(tree.size());
         for (size_t i = 0; i < tree.size(); ++i) {
             int node = tree[i].data;
+            // v2 = log P(silenced on this branch). With silencing switched off we set it
+            // to the log-space sentinel rather than evaluating log(1 - exp(-nu*b)), which
+            // is a domain error at nu = 0 and loses precision for very small nu*b.
+            double v2 = no_silencing
+                ? NEGATIVE_INFINITY
+                : std::log(1 - std::exp(-parameters[0] * branch_lengths[node]));
             result[node] = laml_data(
                 buffer,
                 std::log(parameters[1]),
                 std::log(1 - parameters[1]),
                 std::log(1 - std::exp(-branch_lengths[node])),
-                std::log(1 - std::exp(-parameters[0] * branch_lengths[node]))
+                v2
             );
         }
 
