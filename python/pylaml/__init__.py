@@ -26,6 +26,10 @@ PHI_LB = _core.PHI_LB
 PHI_UB = _core.PHI_UB
 
 
+class LayoutWarning(UserWarning):
+    """Input array is not C-contiguous (still read correctly, via strides)."""
+
+
 class EMResults:
     """Results from EM optimization.
 
