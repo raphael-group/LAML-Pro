@@ -222,18 +222,6 @@ class TestMemoryLayoutIndependence:
         llh_f = pylaml.compute_likelihood(tree=tree, character_matrix=f_order, nu=0.1, phi=0.05)
         assert llh_c == pytest.approx(llh_f, abs=1e-9)
 
-    def test_noncontiguous_view_matches_copy(self):
-        """A non-contiguous view (e.g. a strided slice) must match a copy."""
-        tree = self._tree_8_leaves()
-        rng = np.random.RandomState(1)
-        # Build a wider array, then take a strided column slice -> non-contiguous.
-        wide = rng.randint(0, 8, size=(8, 20)).astype(np.int32)
-        view = wide[:, ::2]  # 10 columns, not contiguous
-        assert not view.flags["C_CONTIGUOUS"]
-        llh_copy = pylaml.compute_likelihood(tree=tree, character_matrix=np.ascontiguousarray(view), nu=0.1, phi=0.05)
-        llh_view = pylaml.compute_likelihood(tree=tree, character_matrix=view, nu=0.1, phi=0.05)
-        assert llh_copy == pytest.approx(llh_view, abs=1e-9)
-
     def test_joint_equals_sum_over_characters(self):
         """Characters are independent: the joint log-likelihood must equal the
         sum of the per-character log-likelihoods, regardless of differing

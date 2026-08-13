@@ -1,8 +1,9 @@
 add_executable(
-    lamlpro_tests 
-    likelihood_tests.cxx 
+    lamlpro_tests
+    likelihood_tests.cxx
     test_obs_llh.cxx
-    ../src/laml_em.cxx 
+    test_numpy_conversion.cxx
+    ../src/laml_em.cxx
     ../src/ultrametric.cxx 
     ../src/models/laml.cxx
     ../src/io.cxx

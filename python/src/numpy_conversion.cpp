@@ -1,4 +1,5 @@
 #include "numpy_conversion.h"
+#include "strided_read.h"
 #include <stdexcept>
 #include <string>
 
@@ -28,27 +29,12 @@ std::vector<std::vector<int>> numpy_to_character_matrix(py::array_t<int32_t> arr
 
     warn_if_noncontiguous(buf, "Character matrix");
 
-    size_t num_leaves = buf.shape[0];
-    size_t num_chars = buf.shape[1];
-
-    // Honor the array's strides instead of assuming a C-contiguous (row-major)
-    // layout. Non-contiguous inputs are common -- e.g. a transposed view, a
-    // slice, or a pandas DataFrame's `.values` (frequently Fortran-ordered).
-    // Reading such an array with hardcoded row-major offsets silently
-    // transposes/scrambles the data and corrupts the likelihood.
+    // Read via the array's actual strides (see strided_read.h) so any memory
+    // layout -- transposed view, slice, Fortran-ordered `.values` -- is handled
+    // correctly rather than silently scrambled.
     const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(int32_t));
     const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(int32_t));
-
-    std::vector<std::vector<int>> result(num_leaves, std::vector<int>(num_chars));
-
-    auto ptr = static_cast<int32_t*>(buf.ptr);
-    for (size_t i = 0; i < num_leaves; i++) {
-        for (size_t j = 0; j < num_chars; j++) {
-            result[i][j] = ptr[i * s0 + j * s1];
-        }
-    }
-
-    return result;
+    return read_strided_2d(static_cast<int32_t*>(buf.ptr), buf.shape[0], buf.shape[1], s0, s1);
 }
 
 std::vector<std::vector<std::vector<double>>> numpy_to_observation_matrix(py::array_t<double> arr) {
@@ -60,34 +46,11 @@ std::vector<std::vector<std::vector<double>>> numpy_to_observation_matrix(py::ar
 
     warn_if_noncontiguous(buf, "Observation matrix");
 
-    size_t num_leaves = buf.shape[0];
-    size_t num_chars = buf.shape[1];
-    size_t num_states = buf.shape[2];
-
-    // Honor strides (see numpy_to_character_matrix) so non-contiguous inputs
-    // are read correctly rather than silently scrambled.
     const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(double));
     const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(double));
     const ssize_t s2 = buf.strides[2] / static_cast<ssize_t>(sizeof(double));
-
-    std::vector<std::vector<std::vector<double>>> result(
-        num_leaves,
-        std::vector<std::vector<double>>(
-            num_chars,
-            std::vector<double>(num_states)
-        )
-    );
-
-    auto ptr = static_cast<double*>(buf.ptr);
-    for (size_t i = 0; i < num_leaves; i++) {
-        for (size_t j = 0; j < num_chars; j++) {
-            for (size_t k = 0; k < num_states; k++) {
-                result[i][j][k] = ptr[i * s0 + j * s1 + k * s2];
-            }
-        }
-    }
-
-    return result;
+    return read_strided_3d(static_cast<double*>(buf.ptr),
+                           buf.shape[0], buf.shape[1], buf.shape[2], s0, s1, s2);
 }
 
 std::vector<std::vector<double>> numpy_to_mutation_priors(py::array_t<double> arr) {
@@ -99,24 +62,9 @@ std::vector<std::vector<double>> numpy_to_mutation_priors(py::array_t<double> ar
 
     warn_if_noncontiguous(buf, "Mutation priors");
 
-    size_t num_chars = buf.shape[0];
-    size_t num_states = buf.shape[1];
-
-    // Honor strides (see numpy_to_character_matrix) so non-contiguous inputs
-    // are read correctly rather than silently scrambled.
     const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(double));
     const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(double));
-
-    std::vector<std::vector<double>> result(num_chars, std::vector<double>(num_states));
-
-    auto ptr = static_cast<double*>(buf.ptr);
-    for (size_t i = 0; i < num_chars; i++) {
-        for (size_t j = 0; j < num_states; j++) {
-            result[i][j] = ptr[i * s0 + j * s1];
-        }
-    }
-
-    return result;
+    return read_strided_2d(static_cast<double*>(buf.ptr), buf.shape[0], buf.shape[1], s0, s1);
 }
 
 py::array_t<double> posterior_to_numpy(
