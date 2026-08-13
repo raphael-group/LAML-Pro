@@ -1,5 +1,24 @@
 #include "numpy_conversion.h"
+#include "strided_read.h"
 #include <stdexcept>
+#include <string>
+
+// Warn on non-C-contiguous input. The stride-based converters read it
+// correctly; the warning just surfaces an unusual layout.
+static void warn_if_noncontiguous(const py::buffer_info& buf, const char* name) {
+    ssize_t expected = static_cast<ssize_t>(buf.itemsize);
+    for (ssize_t d = buf.ndim - 1; d >= 0; --d) {
+        if (buf.strides[d] != expected) {
+            py::module_::import("warnings").attr("warn")(
+                std::string(name) + " is not C-contiguous; reading it via its "
+                "strides (the result is correct). Pass np.ascontiguousarray(...) "
+                "to silence this warning.",
+                py::module_::import("pylaml").attr("LayoutWarning"));
+            return;
+        }
+        expected *= buf.shape[d];
+    }
+}
 
 std::vector<std::vector<int>> numpy_to_character_matrix(py::array_t<int32_t> arr) {
     auto buf = arr.request();
@@ -8,19 +27,14 @@ std::vector<std::vector<int>> numpy_to_character_matrix(py::array_t<int32_t> arr
         throw std::invalid_argument("Character matrix must be 2-dimensional");
     }
 
-    size_t num_leaves = buf.shape[0];
-    size_t num_chars = buf.shape[1];
+    warn_if_noncontiguous(buf, "Character matrix");
 
-    std::vector<std::vector<int>> result(num_leaves, std::vector<int>(num_chars));
-
-    auto ptr = static_cast<int32_t*>(buf.ptr);
-    for (size_t i = 0; i < num_leaves; i++) {
-        for (size_t j = 0; j < num_chars; j++) {
-            result[i][j] = ptr[i * num_chars + j];
-        }
-    }
-
-    return result;
+    // Read via the array's actual strides (see strided_read.h) so any memory
+    // layout -- transposed view, slice, Fortran-ordered `.values` -- is handled
+    // correctly rather than silently scrambled.
+    const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(int32_t));
+    const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(int32_t));
+    return read_strided_2d(static_cast<int32_t*>(buf.ptr), buf.shape[0], buf.shape[1], s0, s1);
 }
 
 std::vector<std::vector<std::vector<double>>> numpy_to_observation_matrix(py::array_t<double> arr) {
@@ -30,28 +44,13 @@ std::vector<std::vector<std::vector<double>>> numpy_to_observation_matrix(py::ar
         throw std::invalid_argument("Observation matrix must be 3-dimensional (leaves, characters, states)");
     }
 
-    size_t num_leaves = buf.shape[0];
-    size_t num_chars = buf.shape[1];
-    size_t num_states = buf.shape[2];
+    warn_if_noncontiguous(buf, "Observation matrix");
 
-    std::vector<std::vector<std::vector<double>>> result(
-        num_leaves,
-        std::vector<std::vector<double>>(
-            num_chars,
-            std::vector<double>(num_states)
-        )
-    );
-
-    auto ptr = static_cast<double*>(buf.ptr);
-    for (size_t i = 0; i < num_leaves; i++) {
-        for (size_t j = 0; j < num_chars; j++) {
-            for (size_t k = 0; k < num_states; k++) {
-                result[i][j][k] = ptr[i * num_chars * num_states + j * num_states + k];
-            }
-        }
-    }
-
-    return result;
+    const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(double));
+    const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(double));
+    const ssize_t s2 = buf.strides[2] / static_cast<ssize_t>(sizeof(double));
+    return read_strided_3d(static_cast<double*>(buf.ptr),
+                           buf.shape[0], buf.shape[1], buf.shape[2], s0, s1, s2);
 }
 
 std::vector<std::vector<double>> numpy_to_mutation_priors(py::array_t<double> arr) {
@@ -61,19 +60,11 @@ std::vector<std::vector<double>> numpy_to_mutation_priors(py::array_t<double> ar
         throw std::invalid_argument("Mutation priors must be 2-dimensional (characters, states)");
     }
 
-    size_t num_chars = buf.shape[0];
-    size_t num_states = buf.shape[1];
+    warn_if_noncontiguous(buf, "Mutation priors");
 
-    std::vector<std::vector<double>> result(num_chars, std::vector<double>(num_states));
-
-    auto ptr = static_cast<double*>(buf.ptr);
-    for (size_t i = 0; i < num_chars; i++) {
-        for (size_t j = 0; j < num_states; j++) {
-            result[i][j] = ptr[i * num_states + j];
-        }
-    }
-
-    return result;
+    const ssize_t s0 = buf.strides[0] / static_cast<ssize_t>(sizeof(double));
+    const ssize_t s1 = buf.strides[1] / static_cast<ssize_t>(sizeof(double));
+    return read_strided_2d(static_cast<double*>(buf.ptr), buf.shape[0], buf.shape[1], s0, s1);
 }
 
 py::array_t<double> posterior_to_numpy(
